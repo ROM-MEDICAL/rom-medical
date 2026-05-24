@@ -1,4 +1,4 @@
-<!-- build: 1779623127 -->
+<!-- build: 1779623322 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2761,12 +2761,8 @@ async function loadAppointments(){
   // Revenue (not for secretary)
   if(!isSecretary){
     // הכנסות — all-clinic (משתמש במשתנים שחושבו למעלה)
-    var allUnconfirmedEst=allPastUnconfirmedLeads2.length*800;
-    var allEstimate=Math.round(allActualRevenue+allUnconfirmedEst+allFutureLeads2.length*800);
-    var allTotalCount=allConfirmedAppts.length+allPastUnconfirmedLeads2.length+allFutureLeads2.length;
-
     var accuracyColor=accuracyPct>=70?'#2e7d32':accuracyPct>=40?'#e65100':'#c62828';
-    var allAccuracyColor=allAccuracyPct2>=70?'#2e7d32':allAccuracyPct2>=40?'#e65100':'#c62828';
+    var allAccuracyColor=allAccuracyPct>=70?'#2e7d32':allAccuracyPct>=40?'#e65100':'#c62828';
 
     function revenueCard(title, myRevenue, myPast, myAccuracy, myAccColor, allRevenue2, allPast, allAccuracy, allAccColor){
       var h='<div class="card" style="padding:14px"><div style="font-size:12px;font-weight:700;color:#4f46e5;margin-bottom:10px;border-bottom:1px solid #e0e0e0;padding-bottom:6px">'+title+'</div>';
