@@ -1,4 +1,4 @@
-<!-- build: 1779615536 -->
+<!-- build: 1779616940 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -10,7 +10,7 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',Arial,sans-serif;background:#f5f7ff;color:#1e293b;direction:rtl;font-size:14px}
-.sidebar{position:fixed;right:0;top:0;width:220px;height:100vh;background:white;color:#1e293b;display:flex;flex-direction:column;z-index:100;overflow-y:auto;border-left:1px solid #e8ecff;box-shadow:2px 0 12px rgba(99,102,241,0.06)}
+.sidebar{position:fixed;right:0;top:0;width:165px;height:100vh;background:white;color:#1e293b;display:flex;flex-direction:column;z-index:100;overflow-y:auto;border-left:1px solid #e8ecff;box-shadow:2px 0 12px rgba(99,102,241,0.06)}
 .sidebar-logo{padding:10px 8px;border-bottom:1px solid #eef0ff;text-align:center}
 .sidebar-logo img{width:100%;height:auto;max-height:90px;object-fit:contain;display:block}
 .sidebar-user{padding:10px 14px;background:#f5f3ff;margin:8px;border-radius:12px;display:flex;align-items:center;gap:10px;border:1px solid #ede9fe}
@@ -24,7 +24,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#f5f7ff;color:#1e293b;di
 .nav-item.active{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;box-shadow:0 4px 12px rgba(99,102,241,0.35)}
 .nav-item .icon{font-size:17px;width:22px;text-align:center;flex-shrink:0}
 .badge-nav{background:#f43f5e;color:white;font-size:10px;padding:2px 7px;border-radius:20px;margin-right:auto;font-weight:600}
-.main{margin-right:268px;min-height:100vh}
+.main{margin-right:261px;min-height:100vh}
 .topbar{background:white;padding:0 20px;height:56px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e8ecff;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(99,102,241,0.05)}
 .topbar h2{font-size:16px;font-weight:700;color:#1e293b}
 .topbar-actions{display:flex;gap:10px;align-items:center}
@@ -155,11 +155,11 @@ textarea.form-control{resize:vertical;min-height:65px}
 
   </nav>
 
-  <div id="doctors-panel" style="position:fixed;right:220px;top:0;width:48px;height:100vh;background:white;z-index:99;display:flex;flex-direction:column;align-items:center;padding:10px 4px;overflow-y:auto;gap:6px;border-left:1px solid #e8ecff;box-shadow:-2px 0 8px rgba(99,102,241,0.04)">
+  <div id="doctors-panel" style="position:fixed;right:165px;top:0;width:96px;height:100vh;background:white;z-index:99;display:flex;flex-direction:column;align-items:center;padding:10px 4px;overflow-y:auto;gap:6px;border-left:1px solid #e8ecff;box-shadow:-2px 0 8px rgba(99,102,241,0.04)">
   <div style="font-size:9px;color:#94a3b8;writing-mode:vertical-rl;transform:rotate(180deg);margin-bottom:8px;letter-spacing:1px;font-weight:600">רופאים</div>
   <div id="doctors-mini-list"></div>
 </div>
-<div class="main" style="margin-right:241px!important">
+<div class="main" style="margin-right:261px!important">
     <div class="topbar">
       <h2 id="page-title">לוח בקרה</h2>
       <div class="topbar-actions">
@@ -2622,18 +2622,19 @@ async function loadAppointments(){
       &&!l.cancelled&&l.lead_status!=='בוטל'&&!l.appointment_done;
   });
 
-  var myActualRevenue=0,myActualAccWeighted=0;
+  var myActualRevenue=0;
   myDoneApptThisMonth.forEach(function(a){
     myActualRevenue+=Number(a.deduction_amount||0);
-    myActualAccWeighted+=100;
   });
-  // לידים לא מאושרים — רק לצפי, לא לסה"כ מאומת
+  // לידים לא מאושרים — רק לצפי, לא לסה"כ בוצעו
   var myUnconfirmedEst=myPastUnconfirmedLeads.length*800;
   var myActualCount=myDoneApptThisMonth.length;
   var confirmedRevenue=Math.round(myActualRevenue);
   var myDoneCount=myDoneApptThisMonth.length;
   var myPendingCount=myPastUnconfirmedLeads.length;
-  var accuracyPct=myActualCount>0?Math.round(myActualAccWeighted/myActualCount):100;
+  // אחוז דיוק: מתוך כל התורים שתאריכם עבר, כמה אומתו
+  var myPastTotal=myDoneCount+myPendingCount;
+  var accuracyPct=myPastTotal>0?Math.round(myDoneCount/myPastTotal*100):100;
 
   // --- צפי הכנסות: הכנסות בוצעו + לא מאושרים + עתידיים ---
   var myFutureLeads=leads.filter(function(l){
@@ -2727,16 +2728,17 @@ async function loadAppointments(){
       return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr
         &&!l.cancelled&&l.lead_status!=='בוטל'&&!l.appointment_done;
     });
-    var allActualRevenue=0,allActualAccWeighted=0;
+    var allActualRevenue=0;
     allDoneApptThisMonth.forEach(function(a){
       allActualRevenue+=Number(a.deduction_amount||0);
-      allActualAccWeighted+=100;
     });
-    // לידים לא מאושרים — רק לצפי, לא לסה"כ מאומת
+    // לידים לא מאושרים — רק לצפי, לא לסה"כ בוצעו
     var allUnconfirmedEst=allPastUnconfirmedLeads.length*800;
     var allActualCount=allDoneApptThisMonth.length;
     var allRevenue=Math.round(allActualRevenue);
-    var allAccuracyPct=100;
+    // אחוז דיוק מרפאה: מתוך כל התורים שתאריכם עבר
+    var allPastTotal=allActualCount+allPastUnconfirmedLeads.length;
+    var allAccuracyPct=allPastTotal>0?Math.round(allActualCount/allPastTotal*100):100;
 
     // צפי הכנסות — מרפאה כוללת
     var allFutureLeads=leadsAll.filter(function(l){
@@ -2762,20 +2764,20 @@ async function loadAppointments(){
         h+='<div style="font-size:10px;color:#6a1b9a;font-weight:600;margin-bottom:4px">👤 שלי</div>';
         h+='<div style="font-size:24px;font-weight:700;color:#2e7d32">&#8362; '+myRevenue.toLocaleString('he-IL')+'</div>';
         h+='<div style="font-size:10px;color:#757575">'+myPast+' תורים אושרו</div>';
-        h+='<div style="margin-top:4px"><span style="font-size:11px;font-weight:600;color:'+myAccColor+'">דיוק: '+myAccuracy+'%</span></div>';
+        h+='<div style="margin-top:4px"><span style="font-size:11px;font-weight:600;color:'+myAccColor+'">אושרו: '+myAccuracy+'%</span></div>';
         h+='</div>';
         h+='<div style="background:#e0e0e0;height:60px;width:1px;margin:auto"></div>';
         h+='<div style="text-align:center;padding:8px">';
         h+='<div style="font-size:10px;color:#1565c0;font-weight:600;margin-bottom:4px">🏥 מרפאה</div>';
         h+='<div style="font-size:24px;font-weight:700;color:#2e7d32">&#8362; '+allRevenue2.toLocaleString('he-IL')+'</div>';
         h+='<div style="font-size:10px;color:#757575">'+allPast+' תורים אושרו</div>';
-        h+='<div style="margin-top:4px"><span style="font-size:11px;font-weight:600;color:'+allAccColor+'">דיוק: '+allAccuracy+'%</span></div>';
+        h+='<div style="margin-top:4px"><span style="font-size:11px;font-weight:600;color:'+allAccColor+'">אושרו: '+allAccuracy+'%</span></div>';
         h+='</div></div>';
       } else {
         h+='<div style="text-align:center;padding:8px">';
         h+='<div style="font-size:26px;font-weight:700;color:#2e7d32">&#8362; '+myRevenue.toLocaleString('he-IL')+'</div>';
         h+='<div style="font-size:10px;color:#757575">'+myPast+' תורים אושרו</div>';
-        h+='<div style="margin-top:4px"><span style="font-size:11px;font-weight:600;color:'+myAccColor+'">דיוק: '+myAccuracy+'%</span></div>';
+        h+='<div style="margin-top:4px"><span style="font-size:11px;font-weight:600;color:'+myAccColor+'">אושרו: '+myAccuracy+'%</span></div>';
         h+='</div>';
       }
       h+='</div>';
@@ -2783,7 +2785,7 @@ async function loadAppointments(){
     }
 
     html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">';
-    html+=revenueCard('💰 הכנסות בוצעו (מאומת)',
+    html+=revenueCard('💰 הכנסות בוצעו',
       confirmedRevenue,myDoneCount+' אושרו / '+myPendingCount+' ממתינים לאישור',accuracyPct,accuracyColor,
       allRevenue,allDoneApptThisMonth.length+' אושרו / '+allPastUnconfirmedLeads.length+' ממתינים לאישור',allAccuracyPct,allAccuracyColor);
     html+=splitCard('💳 צפי הכנסות החודש',
@@ -2795,11 +2797,21 @@ async function loadAppointments(){
 
   // Secretary stats table (not for doctor only)
   if(!isDoctorOnly){
+    var isAdmin=currentRole==='admin'||(currentProfile&&currentProfile.roles&&currentProfile.roles.includes('admin'));
+    // מזכירה רואה רק את עצמה; ADMIN רואה הכל
+    var mySecName=currentProfile&&currentProfile.name?currentProfile.name:(currentProfile&&currentProfile.email?currentProfile.email.split('@')[0]:'');
+    var secKeysFiltered=Object.keys(secStats).filter(function(s){
+      if(s==="לא מוגדר"||!secStats[s].leads)return false;
+      if(isAdmin)return true;
+      // מזכירה — רק עצמה
+      return s===mySecName||s.includes(mySecName)||mySecName.includes(s);
+    }).sort(function(a,b){return secStats[b].leads-secStats[a].leads;});
+
     html+='<div class="card" style="padding:14px;margin-bottom:12px" id="sec-stats-card">';
-    html+='<div style="font-size:12px;font-weight:700;color:#4f46e5;margin-bottom:12px;border-bottom:1px solid #e0e0e0;padding-bottom:6px">ביצועי מזכירות – '+new Date().toLocaleDateString("he-IL",{month:"long",year:"numeric"})+'</div>';
-    var secKeys2=Object.keys(secStats).filter(function(s){return s!=="לא מוגדר"&&secStats[s].leads>0;}).sort(function(a,b){return secStats[b].leads-secStats[a].leads;});
-    if(secKeys2.length>0){
-      html+='<table id="sec-perf-table" style="width:100%"><thead><tr><th>מזכירה</th><th>פניות שענתה</th><th>תורים חדשים</th><th>ביטולים</th><th>% סגירה</th><th></th></tr></thead><tbody id="sec-perf-body"></tbody></table>';
+    var secTitle=isAdmin?'ביצועי מזכירות – ':'ביצועי שלי – ';
+    html+='<div style="font-size:12px;font-weight:700;color:#4f46e5;margin-bottom:12px;border-bottom:1px solid #e0e0e0;padding-bottom:6px">'+secTitle+new Date().toLocaleDateString("he-IL",{month:"long",year:"numeric"})+'</div>';
+    if(secKeysFiltered.length>0){
+      html+='<table id="sec-perf-table" style="width:100%"><thead><tr><th>מזכירה</th><th>פניות שענתה</th><th>תורים חדשים</th><th>ביטולים</th><th>% סגירה</th>'+(isAdmin?'<th></th>':'')+'</tr></thead><tbody id="sec-perf-body"></tbody></table>';
     } else {
       html+='<p style="color:#9e9e9e;text-align:center;padding:14px">אין נתוני מזכירות לחודש זה</p>';
     }
@@ -2811,7 +2823,13 @@ async function loadAppointments(){
   // Build secretary table with DOM (avoid nested quotes)
   var secTbl=document.getElementById('sec-perf-body');
   if(secTbl){
-    var secKeys3=Object.keys(secStats).filter(function(s){return s!=='לא מוגדר'&&secStats[s].leads>0;}).sort(function(a,b){return secStats[b].leads-secStats[a].leads;});
+    var isAdmin2=currentRole==='admin'||(currentProfile&&currentProfile.roles&&currentProfile.roles.includes('admin'));
+    var mySecName2=currentProfile&&currentProfile.name?currentProfile.name:(currentProfile&&currentProfile.email?currentProfile.email.split('@')[0]:'');
+    var secKeys3=Object.keys(secStats).filter(function(s){
+      if(s==='לא מוגדר'||!secStats[s].leads)return false;
+      if(isAdmin2)return true;
+      return s===mySecName2||s.includes(mySecName2)||mySecName2.includes(s);
+    }).sort(function(a,b){return secStats[b].leads-secStats[a].leads;});
     secKeys3.forEach(function(s){
       var st=secStats[s];
       var pct=st.leads>0?Math.round(st.appointments/st.leads*100):0;
@@ -2832,11 +2850,14 @@ async function loadAppointments(){
       var td4=document.createElement('td');td4.style.textAlign='center';
       var badge=document.createElement('span');badge.style.cssText='background:'+color+';color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700';
       badge.textContent=pct+'%';td4.appendChild(badge);tr.appendChild(td4);
-      // History button
+      // History button (admin only)
       var td5=document.createElement('td');
-      var hBtn=document.createElement('button');hBtn.className='btn btn-outline btn-sm';hBtn.style.fontSize='10px';hBtn.textContent='📊 היסטוריה';
-      hBtn.onclick=(function(name){return function(){showSecHistory(name);};})(s);
-      td5.appendChild(hBtn);tr.appendChild(td5);
+      if(isAdmin2){
+        var hBtn=document.createElement('button');hBtn.className='btn btn-outline btn-sm';hBtn.style.fontSize='10px';hBtn.textContent='📊 היסטוריה';
+        hBtn.onclick=(function(name){return function(){showSecHistory(name);};})(s);
+        td5.appendChild(hBtn);
+      }
+      tr.appendChild(td5);
       secTbl.appendChild(tr);
     });
   }
@@ -3786,7 +3807,7 @@ async function loadDoctorsMiniPanel(){
   data.forEach(function(d){
     var btn=document.createElement('div');
     var color=getDoctorColor(d.name);
-    btn.style.cssText='width:40px;height:40px;background:'+color+';border-radius:10px;cursor:pointer;color:white;text-align:center;padding:3px 2px;font-size:8.5px;font-weight:700;line-height:1.25;word-break:break-word;flex-shrink:0;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.12);transition:transform .15s,box-shadow .15s';
+    btn.style.cssText='width:84px;height:44px;background:'+color+';border-radius:10px;cursor:pointer;color:white;text-align:center;padding:4px 6px;font-size:11px;font-weight:700;line-height:1.3;word-break:break-word;flex-shrink:0;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.12);transition:transform .15s,box-shadow .15s';
     btn.onmouseover=function(){this.style.transform='scale(1.08)';this.style.boxShadow='0 4px 10px rgba(0,0,0,0.18)';};
     btn.onmouseout=function(){this.style.transform='scale(1)';this.style.boxShadow='0 2px 6px rgba(0,0,0,0.12)';};
     var shortName=d.name.replace('ד"ר ','').replace('דר ','').split('(')[0].trim();
