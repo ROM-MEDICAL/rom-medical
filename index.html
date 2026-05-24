@@ -1,4 +1,4 @@
-<!-- build: 1779623322 -->
+<!-- build: 1779623850 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2647,24 +2647,29 @@ async function loadAppointments(){
   var allConfirmedRevenue=0;
   allConfirmedAppts.forEach(function(a){allConfirmedRevenue+=Number(a.deduction_amount||0);});
 
-  // --- 2. ממתינים לאימות: תאריך עבר (מתחילת החודש עד אתמול), לא בוטלו, אין appointment ---
+  // --- 2. ממתינים לאימות: תאריך עבר + לא אומת בשום צורה ---
+  // תנאי: lead_status='נקבע תור' + לא בוטל + appointment_done=false + appointment_confirmed=false
+  // + אין appointment בטבלה (confirmedLeadIds)
+  function isUnconfirmed(l){
+    if(!l.appointment_date||l.lead_status!=='נקבע תור')return false;
+    if(l.cancelled||l.lead_status==='בוטל')return false;
+    if(l.appointment_done||l.appointment_confirmed)return false;
+    if(confirmedLeadIds.has(l.id))return false;
+    return true;
+  }
   var myPastUnconfirmed=leads.filter(function(l){
-    return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr
-      &&l.lead_status==='נקבע תור'&&!l.cancelled&&!confirmedLeadIds.has(l.id);
+    return l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr&&isUnconfirmed(l);
   });
   var allPastUnconfirmed=leadsAll.filter(function(l){
-    return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr
-      &&l.lead_status==='נקבע תור'&&!l.cancelled&&!confirmedLeadIds.has(l.id);
+    return l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr&&isUnconfirmed(l);
   });
 
-  // --- 3. עתידיים: תאריך מחר עד סוף החודש, לא בוטלו, אין appointment ---
+  // --- 3. עתידיים: תאריך מחר עד סוף החודש, לא אומת ---
   var myFutureLeads=leads.filter(function(l){
-    return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd
-      &&l.lead_status==='נקבע תור'&&!l.cancelled&&!confirmedLeadIds.has(l.id);
+    return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd&&isUnconfirmed(l);
   });
   var allFutureLeads=leadsAll.filter(function(l){
-    return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd
-      &&l.lead_status==='נקבע תור'&&!l.cancelled&&!confirmedLeadIds.has(l.id);
+    return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd&&isUnconfirmed(l);
   });
 
   // --- חישובים ---
@@ -2685,6 +2690,19 @@ async function loadAppointments(){
   var confirmedRevenue=myConfirmedRevenue;
   var allRevenue2=allConfirmedRevenue;
   var myTotalApptCount=myDoneCount+myPendingCount+myFutureLeads.length;
+
+  // DEBUG — הסר לאחר אימות
+  console.log('[REVENUE]',{
+    confirmed_appts: allConfirmedAppts.length,
+    confirmed_total: allConfirmedRevenue,
+    pending_count: allPastUnconfirmed.length,
+    future_count: allFutureLeads.length,
+    estimated: allEstimatedRevenue,
+    forecast: allForecastRevenue,
+    sample_pending: allPastUnconfirmed.slice(0,3).map(function(l){
+      return {name:l.full_name,date:l.appointment_date,done:l.appointment_done,confirmed:l.appointment_confirmed};
+    })
+  });
 
   // ביצועי מזכירות — לפי return_date (תאריך טיפול בליד)
   var secStats={};
@@ -3382,7 +3400,7 @@ async function loadIncome(){
     db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(2)).lt('date',mStart(1)),
     db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(3)).lt('date',mStart(2)),
     db.from('doctors').select('name,specialty').order('name'),
-    db.from('leads').select('doctor,cancelled,lead_status,appointment_date,id').gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr)
+    db.from('leads').select('doctor,cancelled,lead_status,appointment_date,appointment_done,appointment_confirmed,id').gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr)
   ]);
   // מזהי לידים שיש להם appointment מאושר (למניעת כפל)
   var apptLeadIds=new Set((r0.data||[]).map(function(a){return a.lead_id;}).filter(Boolean));
@@ -3448,14 +3466,16 @@ async function loadIncome(){
     return m;
   }
 
-  // ממתינים: lead_status='נקבע תור' + תאריך עבר (< היום) + לא בוטלו + אין appointment
+  // ממתינים: לא אומת בשום צורה:
+  // lead_status='נקבע תור' + תאריך עבר + לא בוטל
+  // + appointment_done=false + appointment_confirmed=false + אין appointment בטבלה
   var pendByDoc={};
   (rL.data||[]).forEach(function(l){
+    if(!l.appointment_date||l.appointment_date>=todayStr)return; // רק עבר
     if(l.cancelled||l.lead_status==='בוטל')return;
     if(l.lead_status!=='נקבע תור')return;
+    if(l.appointment_done||l.appointment_confirmed)return; // כבר אומת
     if(apptLeadIds.has(l.id))return; // יש appointment מאושר
-    // רק תאריך שכבר עבר (rL נשלף עד todayStr כולל — כאן סנן רק < today)
-    if(!l.appointment_date||l.appointment_date>=todayStr)return;
     var d=matchDoctor(l.doctor);
     pendByDoc[d]=(pendByDoc[d]||0)+1;
   });
