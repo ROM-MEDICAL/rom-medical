@@ -1,4 +1,4 @@
-<!-- build: 1779621477 -->
+<!-- build: 1779623127 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2624,57 +2624,66 @@ async function loadAppointments(){
   }
 
   // ===== חישוב הכנסות =====
-  // מקור אמת יחיד:
-  // מאומת   = appointments.status='done' + deduction_amount (מטיפולוג/מזכירה)
-  // מוערך   = לידים lead_status='נקבע תור' + תאריך עבר + לא בוטלו + אין appointment → 800₪
+  // הגדרות סופיות:
+  // מאומת  = appointments.status='done' מתחילת החודש עד היום (כולל)
+  // מוערך  = מאומת + לידים שתאריכם עבר ולא אומתו × 800₪  (עד היום)
+  // צפי    = מוערך + לידים עתידיים עד סוף החודש × 800₪
 
-  // מזהי לידים שיש להם appointment confirmed (למניעת כפל)
-  var confirmedLeadIds=new Set(appts.filter(function(a){return a.status==='done'&&a.lead_id;}).map(function(a){return a.lead_id;}));
+  // מזהי לידים שיש להם appointment מאושר — למניעת כפל
+  var confirmedLeadIds=new Set(
+    appts.filter(function(a){return a.status==='done'&&a.lead_id;})
+         .map(function(a){return a.lead_id;})
+  );
 
-  // --- הכנסות מאומתות (appointments בלבד) ---
+  // --- 1. מאומת: appointments.status='done' בלבד ---
   var myConfirmedAppts=myAppts.filter(function(a){
     return a.status==='done'&&a.date&&a.date>=thisMonthStart&&a.date<=todayStr;
   });
   var allConfirmedAppts=appts.filter(function(a){
     return a.status==='done'&&a.date&&a.date>=thisMonthStart&&a.date<=todayStr;
   });
+  var myConfirmedRevenue=0;
+  myConfirmedAppts.forEach(function(a){myConfirmedRevenue+=Number(a.deduction_amount||0);});
+  var allConfirmedRevenue=0;
+  allConfirmedAppts.forEach(function(a){allConfirmedRevenue+=Number(a.deduction_amount||0);});
 
-  var myActualRevenue=0;
-  myConfirmedAppts.forEach(function(a){myActualRevenue+=Number(a.deduction_amount||0);});
-  var allActualRevenue=0;
-  allConfirmedAppts.forEach(function(a){allActualRevenue+=Number(a.deduction_amount||0);});
-
-  // --- לידים ממתינים: תאריך עבר, לא בוטלו, אין appointment ---
-  var myPastUnconfirmedLeads=leads.filter(function(l){
+  // --- 2. ממתינים לאימות: תאריך עבר (מתחילת החודש עד אתמול), לא בוטלו, אין appointment ---
+  var myPastUnconfirmed=leads.filter(function(l){
     return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr
-      &&!l.cancelled&&l.lead_status!=='בוטל'&&!confirmedLeadIds.has(l.id);
+      &&l.lead_status==='נקבע תור'&&!l.cancelled&&!confirmedLeadIds.has(l.id);
   });
-  var allPastUnconfirmedLeads2=leadsAll.filter(function(l){
+  var allPastUnconfirmed=leadsAll.filter(function(l){
     return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr
-      &&!l.cancelled&&l.lead_status!=='בוטל'&&!confirmedLeadIds.has(l.id);
+      &&l.lead_status==='נקבע תור'&&!l.cancelled&&!confirmedLeadIds.has(l.id);
   });
 
-  var myDoneCount=myConfirmedAppts.length;
-  var myPendingCount=myPastUnconfirmedLeads.length;
-  var confirmedRevenue=Math.round(myActualRevenue);
-  var allRevenue2=Math.round(allActualRevenue);
-  var myPastTotal=myDoneCount+myPendingCount;
-  var accuracyPct=myPastTotal>0?Math.round(myDoneCount/myPastTotal*100):100;
-  var allPastTotal2=allConfirmedAppts.length+allPastUnconfirmedLeads2.length;
-  var allAccuracyPct2=allPastTotal2>0?Math.round(allConfirmedAppts.length/allPastTotal2*100):100;
-
-  // --- צפי: מאומת + ממתינים + עתידיים ---
+  // --- 3. עתידיים: תאריך מחר עד סוף החודש, לא בוטלו, אין appointment ---
   var myFutureLeads=leads.filter(function(l){
     return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd
-      &&!l.cancelled&&l.lead_status!=='בוטל'&&!confirmedLeadIds.has(l.id);
+      &&l.lead_status==='נקבע תור'&&!l.cancelled&&!confirmedLeadIds.has(l.id);
   });
-  var allFutureLeads2=leadsAll.filter(function(l){
+  var allFutureLeads=leadsAll.filter(function(l){
     return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd
-      &&!l.cancelled&&l.lead_status!=='בוטל'&&!confirmedLeadIds.has(l.id);
+      &&l.lead_status==='נקבע תור'&&!l.cancelled&&!confirmedLeadIds.has(l.id);
   });
-  var myUnconfirmedEst=myPendingCount*800;
-  var myFutureRevenue=myFutureLeads.length*800;
-  var revenueEst=Math.round(myActualRevenue+myUnconfirmedEst+myFutureRevenue);
+
+  // --- חישובים ---
+  var myDoneCount=myConfirmedAppts.length;
+  var myPendingCount=myPastUnconfirmed.length;
+  // מוערך = מאומת + ממתינים×800 (עד היום)
+  var myEstimatedRevenue=Math.round(myConfirmedRevenue+myPendingCount*800);
+  var allEstimatedRevenue=Math.round(allConfirmedRevenue+allPastUnconfirmed.length*800);
+  // צפי = מוערך + עתידיים×800 (עד סוף החודש)
+  var myForecastRevenue=Math.round(myEstimatedRevenue+myFutureLeads.length*800);
+  var allForecastRevenue=Math.round(allEstimatedRevenue+allFutureLeads.length*800);
+  // אחוז אימות: מתוך כל שעבר, כמה אומת
+  var myPastTotal=myDoneCount+myPendingCount;
+  var accuracyPct=myPastTotal>0?Math.round(myDoneCount/myPastTotal*100):100;
+  var allPastTotal=allConfirmedAppts.length+allPastUnconfirmed.length;
+  var allAccuracyPct=allPastTotal>0?Math.round(allConfirmedAppts.length/allPastTotal*100):100;
+  // שמור משתנים ישנים לתאימות
+  var confirmedRevenue=myConfirmedRevenue;
+  var allRevenue2=allConfirmedRevenue;
   var myTotalApptCount=myDoneCount+myPendingCount+myFutureLeads.length;
 
   // ביצועי מזכירות — לפי return_date (תאריך טיפול בליד)
@@ -2787,14 +2796,60 @@ async function loadAppointments(){
       return h;
     }
 
-    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">';
-    html+=revenueCard('💰 הכנסות בוצעו',
-      confirmedRevenue,myDoneCount+' מאומתים / '+myPendingCount+' מוערכים (800₪)',accuracyPct,accuracyColor,
-      allRevenue2,allConfirmedAppts.length+' מאומתים / '+allPastUnconfirmedLeads2.length+' מוערכים (800₪)',allAccuracyPct2,allAccuracyColor);
-    html+=splitCard('💳 צפי הכנסות החודש',
-      '&#8362; '+revenueEst.toLocaleString('he-IL'),myTotalApptCount+' תורים סה"כ',
-      '&#8362; '+allEstimate.toLocaleString('he-IL'),allTotalCount+' תורים סה"כ',
-      '#f3e5f5','#6a1b9a','#e8eaf6','#1a237e');
+    html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">';
+
+    // כרטיס 1: מאומת (appointments בלבד)
+    function revCell(lbl,rev,cnt,pct,pctColor,side){
+      var sc=side==='my'?'#6a1b9a':'#1565c0';
+      var icon=side==='my'?'👤 שלי':'🏥 מרפאה';
+      var h='<div style="text-align:center;padding:8px">';
+      if(showDual)h+='<div style="font-size:10px;color:'+sc+';font-weight:600;margin-bottom:4px">'+icon+'</div>';
+      h+='<div style="font-size:22px;font-weight:700;color:#2e7d32">&#8362; '+rev.toLocaleString("he-IL")+'</div>';
+      h+='<div style="font-size:10px;color:#757575;margin-top:2px">'+cnt+'</div>';
+      h+='<div style="margin-top:4px"><span style="font-size:11px;font-weight:600;color:'+pctColor+'">אומת: '+pct+'%</span></div>';
+      h+='</div>';return h;
+    }
+    var c1='<div class="card" style="padding:12px"><div style="font-size:12px;font-weight:700;color:#4f46e5;margin-bottom:8px;border-bottom:1px solid #e0e0e0;padding-bottom:5px">✅ מאומת</div>';
+    if(showDual){
+      c1+='<div style="display:grid;grid-template-columns:1fr 1px 1fr;align-items:start">';
+      c1+=revCell('',myConfirmedRevenue,myDoneCount+' תורים',accuracyPct,accuracyColor,'my');
+      c1+='<div style="background:#e0e0e0;height:50px;width:1px;margin:auto"></div>';
+      c1+=revCell('',allConfirmedRevenue,allConfirmedAppts.length+' תורים',allAccuracyPct,allAccuracyColor,'all');
+      c1+='</div>';
+    } else {
+      c1+=revCell('',myConfirmedRevenue,myDoneCount+' תורים אומתו',accuracyPct,accuracyColor,'my');
+    }
+    c1+='</div>';
+    html+=c1;
+
+    // כרטיס 2: מוערך (מאומת + ממתינים עד היום)
+    var c2='<div class="card" style="padding:12px"><div style="font-size:12px;font-weight:700;color:#e65100;margin-bottom:8px;border-bottom:1px solid #ffe0b2;padding-bottom:5px">⏳ מוערך (עד היום)</div>';
+    if(showDual){
+      c2+='<div style="display:grid;grid-template-columns:1fr 1px 1fr;align-items:start">';
+      c2+='<div style="text-align:center;padding:8px"><div style="font-size:10px;color:#6a1b9a;font-weight:600;margin-bottom:4px">👤 שלי</div><div style="font-size:22px;font-weight:700;color:#e65100">&#8362; '+myEstimatedRevenue.toLocaleString('he-IL')+'</div><div style="font-size:10px;color:#757575;margin-top:2px">'+myDoneCount+' מאומת + '+myPendingCount+' ×800₪</div></div>';
+      c2+='<div style="background:#e0e0e0;height:50px;width:1px;margin:auto"></div>';
+      c2+='<div style="text-align:center;padding:8px"><div style="font-size:10px;color:#1565c0;font-weight:600;margin-bottom:4px">🏥 מרפאה</div><div style="font-size:22px;font-weight:700;color:#e65100">&#8362; '+allEstimatedRevenue.toLocaleString('he-IL')+'</div><div style="font-size:10px;color:#757575;margin-top:2px">'+allConfirmedAppts.length+' מאומת + '+allPastUnconfirmed.length+' ×800₪</div></div>';
+      c2+='</div>';
+    } else {
+      c2+='<div style="text-align:center;padding:8px"><div style="font-size:22px;font-weight:700;color:#e65100">&#8362; '+myEstimatedRevenue.toLocaleString("he-IL")+'</div><div style="font-size:10px;color:#757575;margin-top:2px">'+myDoneCount+' מאומת + '+myPendingCount+' ×800₪</div></div>';
+    }
+    c2+='</div>';
+    html+=c2;
+
+    // כרטיס 3: צפי (מוערך + עתידיים)
+    var c3='<div class="card" style="padding:12px"><div style="font-size:12px;font-weight:700;color:#6a1b9a;margin-bottom:8px;border-bottom:1px solid #e8eaf6;padding-bottom:5px">💳 צפי הכנסות החודש</div>';
+    if(showDual){
+      c3+='<div style="display:grid;grid-template-columns:1fr 1px 1fr;align-items:start">';
+      c3+='<div style="text-align:center;padding:8px"><div style="font-size:10px;color:#6a1b9a;font-weight:600;margin-bottom:4px">👤 שלי</div><div style="font-size:22px;font-weight:700;color:#6a1b9a">&#8362; '+myForecastRevenue.toLocaleString('he-IL')+'</div><div style="font-size:10px;color:#757575;margin-top:2px">+'+myFutureLeads.length+' עתידיים ×800₪</div></div>';
+      c3+='<div style="background:#e0e0e0;height:50px;width:1px;margin:auto"></div>';
+      c3+='<div style="text-align:center;padding:8px"><div style="font-size:10px;color:#1565c0;font-weight:600;margin-bottom:4px">🏥 מרפאה</div><div style="font-size:22px;font-weight:700;color:#6a1b9a">&#8362; '+allForecastRevenue.toLocaleString('he-IL')+'</div><div style="font-size:10px;color:#757575;margin-top:2px">+'+allFutureLeads.length+' עתידיים ×800₪</div></div>';
+      c3+='</div>';
+    } else {
+      c3+='<div style="text-align:center;padding:8px"><div style="font-size:22px;font-weight:700;color:#6a1b9a">&#8362; '+myForecastRevenue.toLocaleString("he-IL")+'</div><div style="font-size:10px;color:#757575;margin-top:2px">'+myTotalApptCount+' תורים סה"כ</div></div>';
+    }
+    c3+='</div>';
+    html+=c3;
+
     html+='</div>';
   }
 
@@ -3397,13 +3452,14 @@ async function loadIncome(){
     return m;
   }
 
-  // לידים ממתינים: lead_status='נקבע תור', תאריך עבר, לא בוטלו, אין appointment מאושר
-  // אלו מוערכים ב-800₪ כל אחד (לא נכנסים ל"וודאי", רק ל"מוערך")
+  // ממתינים: lead_status='נקבע תור' + תאריך עבר (< היום) + לא בוטלו + אין appointment
   var pendByDoc={};
   (rL.data||[]).forEach(function(l){
     if(l.cancelled||l.lead_status==='בוטל')return;
     if(l.lead_status!=='נקבע תור')return;
-    if(apptLeadIds.has(l.id))return; // כבר יש appointment מאושר — לא מוערך
+    if(apptLeadIds.has(l.id))return; // יש appointment מאושר
+    // רק תאריך שכבר עבר (rL נשלף עד todayStr כולל — כאן סנן רק < today)
+    if(!l.appointment_date||l.appointment_date>=todayStr)return;
     var d=matchDoctor(l.doctor);
     pendByDoc[d]=(pendByDoc[d]||0)+1;
   });
@@ -3416,17 +3472,22 @@ async function loadIncome(){
   Object.keys(pendByDoc).forEach(function(k){docSet.add(k);});
   var docs=Array.from(docSet).sort();
 
+  // --- סיכום לפי הגדרות סופיות ---
+  // מאומת = appointments.status='done' (cur)
+  // מוערך = מאומת + ממתינים×800 (תאריך עבר, אין appointment)
+  // צפי   = מוערך + עתידיים×800 (לא מחושב כאן — רק במודול משימות)
   var totC=0,totA=0,totOH=0;
   docs.forEach(function(d){totC+=(cur[d]?cur[d].rev:0);totA+=(cur[d]?cur[d].cnt:0);totOH+=(cur[d]?cur[d].oh:0);});
-  var totP=0;
-  Object.keys(pendByDoc).forEach(function(k){totP+=pendByDoc[k]*800;});
-  var totE=totC+totP,totN=totC-totOH;
+  var totPendCount=Object.values(pendByDoc).reduce(function(s,v){return s+v;},0);
+  var totPendRev=totPendCount*800;
+  var totE=totC+totPendRev; // מוערך = מאומת + ממתינים
+  var totN=totC-totOH;
   var mn=now.toLocaleDateString('he-IL',{month:'long',year:'numeric'});
   var h='<div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">';
   h+='<div class="stat-card stat-green"><div class="stat-label">✅ מאומת ('+mn+')</div><div class="stat-val">₪'+totC.toLocaleString('he-IL')+'</div></div>';
-  h+='<div class="stat-card" style="border-right:3px solid #e65100;background:#fff3e0"><div class="stat-label">⏳ מוערך (800₪ × '+Object.values(pendByDoc).reduce(function(s,v){return s+v;},0)+' תורים)</div><div class="stat-val" style="color:#e65100">₪'+totE.toLocaleString('he-IL')+'</div></div>';
+  h+='<div class="stat-card" style="border-right:3px solid #e65100;background:#fff3e0"><div class="stat-label">⏳ מוערך (מאומת + '+totPendCount+' ×800₪)</div><div class="stat-val" style="color:#e65100">₪'+totE.toLocaleString('he-IL')+'</div></div>';
   h+='<div class="stat-card stat-orange"><div class="stat-label">קיזוז ('+ohLabel()+')</div><div class="stat-val">₪'+totOH.toLocaleString('he-IL')+'</div></div>';
-  h+='<div class="stat-card stat-blue"><div class="stat-label">נטו לחלוקה (וודאי)</div><div class="stat-val">₪'+totN.toLocaleString('he-IL')+'</div></div>';
+  h+='<div class="stat-card stat-blue"><div class="stat-label">נטו לחלוקה (מאומת)</div><div class="stat-val">₪'+totN.toLocaleString('he-IL')+'</div></div>';
   h+='</div>';
   h+='<div class="card" style="padding:0"><div class="tbl-wrap"><table>';
   h+='<tr><th>רופא</th><th>תורים <span style="font-weight:400;font-size:10px;color:#bbb">(ממוצע 3ח)</span></th><th style="color:#2e7d32">✅ וודאי <span style="font-weight:400;font-size:10px;color:#bbb">(ממוצע)</span></th><th style="color:#e65100">⏳ מוערך</th><th>קיזוז ('+ohLabel()+')</th><th>נטו</th></tr>';
@@ -4393,6 +4454,98 @@ async function loadAdmin(){
   el.appendChild(impBox);
   var impResult=document.createElement('div');impResult.id='tipulog-import-result';
   el.appendChild(impResult);
+
+  // ===== לוגיקת חישוב הכנסות =====
+  var logicHdr=document.createElement('div');
+  logicHdr.style.cssText='font-size:16px;font-weight:700;color:#4f46e5;margin-top:32px;margin-bottom:14px';
+  logicHdr.textContent='📊 לוגיקת חישוב הכנסות';
+  el.appendChild(logicHdr);
+
+  var logicBox=document.createElement('div');
+  logicBox.style.cssText='background:white;border-radius:14px;border:1px solid #eef0ff;padding:20px;margin-bottom:14px;box-shadow:0 2px 8px rgba(99,102,241,0.06)';
+  logicBox.innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px">
+      <div style="background:#e1f5ee;border-radius:10px;padding:14px;border:1px solid #1d9e75">
+        <div style="font-size:13px;font-weight:700;color:#085041;margin-bottom:6px">✅ מאומת</div>
+        <div style="font-size:12px;color:#0f6e56;line-height:1.7">
+          תורים שאושרו ב<strong>appointments</strong><br>
+          (status = 'done')<br>
+          מתחילת החודש עד <strong>היום</strong><br>
+          סכום = deduction_amount אמיתי
+        </div>
+      </div>
+      <div style="background:#fff3e0;border-radius:10px;padding:14px;border:1px solid #e65100">
+        <div style="font-size:13px;font-weight:700;color:#bf360c;margin-bottom:6px">⏳ מוערך (עד היום)</div>
+        <div style="font-size:12px;color:#e65100;line-height:1.7">
+          = מאומת<br>
+          + לידים "נקבע תור" שתאריכם <strong>עבר</strong><br>
+          ולא אומתו × <strong>800₪</strong><br>
+          (אין appointment מאושר)
+        </div>
+      </div>
+      <div style="background:#f3e5f5;border-radius:10px;padding:14px;border:1px solid #7b1fa2">
+        <div style="font-size:13px;font-weight:700;color:#4a148c;margin-bottom:6px">💳 צפי עד סוף החודש</div>
+        <div style="font-size:12px;color:#7b1fa2;line-height:1.7">
+          = מוערך<br>
+          + לידים "נקבע תור" <strong>עתידיים</strong><br>
+          עד סוף החודש × <strong>800₪</strong>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:10px">מקורות אימות:</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="background:#f8f9ff;border-radius:8px;padding:12px;border-right:3px solid #4f46e5">
+        <div style="font-size:12px;font-weight:700;color:#4f46e5;margin-bottom:4px">📥 ייבוא טיפולוג</div>
+        <div style="font-size:11px;color:#64748b;line-height:1.6">
+          המהימן ביותר — מנצח על כל שאר המקורות.<br>
+          תור בטיפולוג → appointment_confirmed=true + סכום מהטיפולוג.<br>
+          תור שהיה במערכת ולא בטיפולוג → התראה: בוצע/נדחה/בוטל.
+        </div>
+      </div>
+      <div style="background:#f8f9ff;border-radius:8px;padding:12px;border-right:3px solid #10b981">
+        <div style="font-size:12px;font-weight:700;color:#059669;margin-bottom:4px">👤 אישור מזכירה</div>
+        <div style="font-size:12px;color:#64748b;line-height:1.6">
+          כשתאריך תור חולף — קופצת התראה למזכירה.<br>
+          המזכירה מאשרת ביצוע + מנקבת סכום/פעולה.<br>
+          ללא אישור → נשאר 800₪ הערכה (מוערך).
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:10px">שאילתות SQL לאימות נתונים:</div>
+    <div style="background:#1e293b;border-radius:10px;padding:14px;font-family:monospace;font-size:11px;color:#e2e8f0;white-space:pre-wrap;line-height:1.7;overflow-x:auto">-- 1. סה"כ מאומת החודש
+SELECT COUNT(*), SUM(deduction_amount) AS confirmed_total
+FROM appointments
+WHERE status = 'done'
+  AND date >= date_trunc('month', CURRENT_DATE)
+  AND date <= CURRENT_DATE;
+
+-- 2. ממתינים לאימות (×800₪)
+SELECT COUNT(*) AS pending_count, COUNT(*)*800 AS estimated
+FROM leads l
+WHERE lead_status = 'נקבע תור'
+  AND cancelled IS NOT TRUE
+  AND appointment_date >= date_trunc('month', CURRENT_DATE)
+  AND appointment_date &lt; CURRENT_DATE
+  AND NOT EXISTS (
+    SELECT 1 FROM appointments a
+    WHERE a.lead_id = l.id AND a.status = 'done'
+  );
+
+-- 3. עתידיים לצפי (×800₪)
+SELECT COUNT(*) AS future_count, COUNT(*)*800 AS forecast
+FROM leads l
+WHERE lead_status = 'נקבע תור'
+  AND cancelled IS NOT TRUE
+  AND appointment_date &gt; CURRENT_DATE
+  AND appointment_date &lt;= date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day'
+  AND NOT EXISTS (
+    SELECT 1 FROM appointments a
+    WHERE a.lead_id = l.id AND a.status = 'done'
+  );</div>
+  `;
+  el.appendChild(logicBox);
 }
 
 async function openUserModal(uid,docsArg){
