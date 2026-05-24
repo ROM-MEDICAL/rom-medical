@@ -1,4 +1,4 @@
-<!-- build: 1779616940 -->
+<!-- build: 1779617894 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1171,27 +1171,41 @@ function filterLeads(){
     renderLeadsTable();return;
   }
   
+  // כאשר סטטוס = "נקבע תור" — חיפוש לפי appointment_date, ללא מגבלת תאריך
+  var isApptSearch=(status==='נקבע תור'||status==='appointment_done');
   filteredLeads=allLeads.filter(l=>{
-    var leadDate=l.original_date?new Date(l.original_date+'T12:00:00'):l.created_at?new Date(l.created_at):null;
-    if(cutoff&&leadDate&&leadDate<cutoff)return false;
-    if(cutoffEnd&&leadDate&&leadDate>cutoffEnd)return false;
-    if(doctor&&l.doctor!==doctor)return false;
-    if(secretary&&l.secretary!==secretary)return false;
-    if(status&&l.lead_status!==status)return false;
-    if(source&&l.source!==source)return false;
+    if(isApptSearch){
+      // חיפוש תורים: לא מסנן לפי תאריך קבלת ליד, אלא לפי appointment_date
+      if(doctor&&l.doctor!==doctor)return false;
+      if(secretary&&l.secretary!==secretary)return false;
+      if(status&&l.lead_status!==status)return false;
+      if(source&&l.source!==source)return false;
+    } else {
+      var leadDate=l.original_date?new Date(l.original_date+'T12:00:00'):l.created_at?new Date(l.created_at):null;
+      if(cutoff&&leadDate&&leadDate<cutoff)return false;
+      if(cutoffEnd&&leadDate&&leadDate>cutoffEnd)return false;
+      if(doctor&&l.doctor!==doctor)return false;
+      if(secretary&&l.secretary!==secretary)return false;
+      if(status&&l.lead_status!==status)return false;
+      if(source&&l.source!==source)return false;
+    }
     if(search){
-      // Normalize phone search (with or without dash)
       var normSearch=search.replace(/-/g,'');
       var normPhone=(l.phone||'').replace(/-/g,'');
       var nameMatch=(l.full_name||'').toLowerCase().includes(search);
       var phoneMatch=normPhone.includes(normSearch)||((l.phone||'').includes(search));
       var notesMatch=(l.notes||'').toLowerCase().includes(search);
       var docMatch=(l.doctor||'').toLowerCase().includes(search);
-      if(!nameMatch&&!phoneMatch&&!notesMatch&&!docMatch)return false;
+      var apptDateMatch=(l.appointment_date||'').includes(search);
+      if(!nameMatch&&!phoneMatch&&!notesMatch&&!docMatch&&!apptDateMatch)return false;
     }
     return true;
   });
-  filteredLeads.sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+  if(isApptSearch){
+    filteredLeads.sort((a,b)=>new Date(b.appointment_date||0)-new Date(a.appointment_date||0));
+  } else {
+    filteredLeads.sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+  }
   renderLeadsTable();
 }
 
@@ -3316,18 +3330,24 @@ async function loadIncome(){
   function ohLabel(){return 'תקורה (ברירת מחדל 30%)';}
 
   var now=new Date();
-  var thisMonthStart=now.toISOString().slice(0,7)+'-01';
-  var todayStr=now.toISOString().slice(0,10);
-  function mStart(b){var d=new Date(now.getFullYear(),now.getMonth()-b,1);return d.toISOString().slice(0,10);}
+  // השתמש בתאריך לוקאלי (ישראל) כדי להתאים למודול משימות
+  function pad(n){return n<10?'0'+n:n;}
+  var todayStr=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
+  var thisMonthStart=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-01';
+  function mStart(b){var d=new Date(now.getFullYear(),now.getMonth()-b,1);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01';}
 
-  var[r0,r1,r2,r3,rd,rL]=await Promise.all([
-    db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',thisMonthStart).lt('date',todayStr),
+  // שלוף גם appointment_ids מלידים כדי לא לספור כפילויות
+  var[r0,r1,r2,r3,rd,rL,rApptIds]=await Promise.all([
+    db.from('appointments').select('id,doctor,deduction_amount,procedure_name,lead_id').eq('status','done').gte('date',thisMonthStart).lte('date',todayStr),
     db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(1)).lt('date',mStart(0)),
     db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(2)).lt('date',mStart(1)),
     db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(3)).lt('date',mStart(2)),
     db.from('doctors').select('name,specialty').order('name'),
-    db.from('leads').select('doctor,appointment_done,cancelled,lead_status,appointment_date').gte('appointment_date',thisMonthStart).lt('appointment_date',todayStr)
+    db.from('leads').select('doctor,appointment_done,cancelled,lead_status,appointment_date,id').gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr),
+    db.from('appointments').select('lead_id').eq('status','done').gte('date',thisMonthStart).lte('date',todayStr)
   ]);
+  // מזהי לידים שיש להם appointment — לא נספור אותם פעמיים
+  var apptLeadIds=new Set((rApptIds.data||[]).map(function(a){return a.lead_id;}).filter(Boolean));
 
   // ======= מיפוי שמות רופאים =======
   // officialDoctors = רשימת השמות הרשמיים מ-doctors table
@@ -3390,6 +3410,18 @@ async function loadIncome(){
     return m;
   }
 
+  // לידים עם appointment_done=true שאין להם appointment — נוסיף כהכנסה בוצעה
+  var leadDoneByDoc={};
+  (rL.data||[]).forEach(function(l){
+    if(!l.appointment_done||l.cancelled||l.lead_status==='בוטל')return;
+    if(apptLeadIds.has(l.id))return; // כבר נספר ב-appointments
+    var d=matchDoctor(l.doctor);
+    if(!leadDoneByDoc[d])leadDoneByDoc[d]={rev:0,cnt:0,oh:0};
+    leadDoneByDoc[d].rev+=800; // הכנסה מוערכת
+    leadDoneByDoc[d].cnt++;
+    leadDoneByDoc[d].oh+=Math.round(800*DEFAULT_OVERHEAD);
+  });
+
   var pendByDoc={};
   (rL.data||[]).forEach(function(l){
     if(l.appointment_done||l.cancelled||l.lead_status==='בוטל')return;
@@ -3398,6 +3430,13 @@ async function loadIncome(){
   });
 
   var cur=agg(r0.data),p1=agg(r1.data),p2=agg(r2.data),p3=agg(r3.data);
+  // מזג לידים עם done לתוך cur
+  Object.keys(leadDoneByDoc).forEach(function(d){
+    if(!cur[d])cur[d]={rev:0,cnt:0,oh:0};
+    cur[d].rev+=leadDoneByDoc[d].rev;
+    cur[d].cnt+=leadDoneByDoc[d].cnt;
+    cur[d].oh+=leadDoneByDoc[d].oh;
+  });
 
   // רשימת רופאים — רק הרשמיים (+ כל מה שלא הוצמד)
   var docSet=new Set(officialDoctors);
