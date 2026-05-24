@@ -1,4 +1,4 @@
-<!-- build: 1779617894 -->
+<!-- build: 1779621477 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2623,42 +2623,59 @@ async function loadAppointments(){
     return 950;
   }
 
-  // ===== חישוב הכנסות — לוגיקה חדשה =====
+  // ===== חישוב הכנסות =====
+  // מקור אמת יחיד:
+  // מאומת   = appointments.status='done' + deduction_amount (מטיפולוג/מזכירה)
+  // מוערך   = לידים lead_status='נקבע תור' + תאריך עבר + לא בוטלו + אין appointment → 800₪
 
-  // --- הכנסות בוצעו: תורים מתחילת החודש עד היום ---
-  // 1. אושר ביצוע (done) → סכום אמיתי, דיוק 100%
-  var myDoneApptThisMonth=myAppts.filter(function(a){
-    return a.status==='done'&&a.date&&a.date>=thisMonthStart&&a.date<todayStr;
+  // מזהי לידים שיש להם appointment confirmed (למניעת כפל)
+  var confirmedLeadIds=new Set(appts.filter(function(a){return a.status==='done'&&a.lead_id;}).map(function(a){return a.lead_id;}));
+
+  // --- הכנסות מאומתות (appointments בלבד) ---
+  var myConfirmedAppts=myAppts.filter(function(a){
+    return a.status==='done'&&a.date&&a.date>=thisMonthStart&&a.date<=todayStr;
   });
-  // 2. נקבע תור, תאריך עבר, לא אושר ביצוע → 800₪, דיוק 75%
-  var myPastUnconfirmedLeads=leads.filter(function(l){
-    return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr
-      &&!l.cancelled&&l.lead_status!=='בוטל'&&!l.appointment_done;
+  var allConfirmedAppts=appts.filter(function(a){
+    return a.status==='done'&&a.date&&a.date>=thisMonthStart&&a.date<=todayStr;
   });
 
   var myActualRevenue=0;
-  myDoneApptThisMonth.forEach(function(a){
-    myActualRevenue+=Number(a.deduction_amount||0);
+  myConfirmedAppts.forEach(function(a){myActualRevenue+=Number(a.deduction_amount||0);});
+  var allActualRevenue=0;
+  allConfirmedAppts.forEach(function(a){allActualRevenue+=Number(a.deduction_amount||0);});
+
+  // --- לידים ממתינים: תאריך עבר, לא בוטלו, אין appointment ---
+  var myPastUnconfirmedLeads=leads.filter(function(l){
+    return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr
+      &&!l.cancelled&&l.lead_status!=='בוטל'&&!confirmedLeadIds.has(l.id);
   });
-  // לידים לא מאושרים — רק לצפי, לא לסה"כ בוצעו
-  var myUnconfirmedEst=myPastUnconfirmedLeads.length*800;
-  var myActualCount=myDoneApptThisMonth.length;
-  var confirmedRevenue=Math.round(myActualRevenue);
-  var myDoneCount=myDoneApptThisMonth.length;
+  var allPastUnconfirmedLeads2=leadsAll.filter(function(l){
+    return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr
+      &&!l.cancelled&&l.lead_status!=='בוטל'&&!confirmedLeadIds.has(l.id);
+  });
+
+  var myDoneCount=myConfirmedAppts.length;
   var myPendingCount=myPastUnconfirmedLeads.length;
-  // אחוז דיוק: מתוך כל התורים שתאריכם עבר, כמה אומתו
+  var confirmedRevenue=Math.round(myActualRevenue);
+  var allRevenue2=Math.round(allActualRevenue);
   var myPastTotal=myDoneCount+myPendingCount;
   var accuracyPct=myPastTotal>0?Math.round(myDoneCount/myPastTotal*100):100;
+  var allPastTotal2=allConfirmedAppts.length+allPastUnconfirmedLeads2.length;
+  var allAccuracyPct2=allPastTotal2>0?Math.round(allConfirmedAppts.length/allPastTotal2*100):100;
 
-  // --- צפי הכנסות: הכנסות בוצעו + לא מאושרים + עתידיים ---
+  // --- צפי: מאומת + ממתינים + עתידיים ---
   var myFutureLeads=leads.filter(function(l){
-    return l.appointment_date&&l.appointment_date>=todayStr&&l.appointment_date<=thisMonthEnd
-      &&!l.cancelled&&l.lead_status!=='בוטל'&&!l.appointment_done;
+    return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd
+      &&!l.cancelled&&l.lead_status!=='בוטל'&&!confirmedLeadIds.has(l.id);
   });
+  var allFutureLeads2=leadsAll.filter(function(l){
+    return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd
+      &&!l.cancelled&&l.lead_status!=='בוטל'&&!confirmedLeadIds.has(l.id);
+  });
+  var myUnconfirmedEst=myPendingCount*800;
   var myFutureRevenue=myFutureLeads.length*800;
-  var myForecastTotal=myActualCount+myPastUnconfirmedLeads.length+myFutureLeads.length;
   var revenueEst=Math.round(myActualRevenue+myUnconfirmedEst+myFutureRevenue);
-  var myTotalApptCount=myForecastTotal;
+  var myTotalApptCount=myDoneCount+myPendingCount+myFutureLeads.length;
 
   // ביצועי מזכירות — לפי return_date (תאריך טיפול בליד)
   var secStats={};
@@ -2734,41 +2751,13 @@ async function loadAppointments(){
 
   // Revenue (not for secretary)
   if(!isSecretary){
-    // הכנסות בוצעו — מרפאה כוללת
-    var allDoneApptThisMonth=appts.filter(function(a){
-      return a.status==='done'&&a.date&&a.date>=thisMonthStart&&a.date<todayStr;
-    });
-    var allPastUnconfirmedLeads=leadsAll.filter(function(l){
-      return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr
-        &&!l.cancelled&&l.lead_status!=='בוטל'&&!l.appointment_done;
-    });
-    var allActualRevenue=0;
-    allDoneApptThisMonth.forEach(function(a){
-      allActualRevenue+=Number(a.deduction_amount||0);
-    });
-    // לידים לא מאושרים — רק לצפי, לא לסה"כ בוצעו
-    var allUnconfirmedEst=allPastUnconfirmedLeads.length*800;
-    var allActualCount=allDoneApptThisMonth.length;
-    var allRevenue=Math.round(allActualRevenue);
-    // אחוז דיוק מרפאה: מתוך כל התורים שתאריכם עבר
-    var allPastTotal=allActualCount+allPastUnconfirmedLeads.length;
-    var allAccuracyPct=allPastTotal>0?Math.round(allActualCount/allPastTotal*100):100;
+    // הכנסות — all-clinic (משתמש במשתנים שחושבו למעלה)
+    var allUnconfirmedEst=allPastUnconfirmedLeads2.length*800;
+    var allEstimate=Math.round(allActualRevenue+allUnconfirmedEst+allFutureLeads2.length*800);
+    var allTotalCount=allConfirmedAppts.length+allPastUnconfirmedLeads2.length+allFutureLeads2.length;
 
-    // צפי הכנסות — מרפאה כוללת
-    var allFutureLeads=leadsAll.filter(function(l){
-      return l.appointment_date&&l.appointment_date>=todayStr&&l.appointment_date<=thisMonthEnd
-        &&!l.cancelled&&l.lead_status!=='בוטל'&&!l.appointment_done;
-    });
-    var allEstimate=Math.round(allActualRevenue+allUnconfirmedEst+allFutureLeads.length*800);
-    var allTotalCount=allActualCount+allPastUnconfirmedLeads.length+allFutureLeads.length;
-    var allMonthLeads=leadsAll.filter(function(l){
-      return l.appointment_date&&l.appointment_date>=thisMonthStart&&
-        l.appointment_date<=thisMonthEnd&&!l.cancelled&&l.lead_status!=='בוטל';
-    }); // צפי = אותו חישוב
-
-    // תצוגת הכנסות בוצעו עם אחוז דיוק
     var accuracyColor=accuracyPct>=70?'#2e7d32':accuracyPct>=40?'#e65100':'#c62828';
-    var allAccuracyColor=allAccuracyPct>=70?'#2e7d32':allAccuracyPct>=40?'#e65100':'#c62828';
+    var allAccuracyColor=allAccuracyPct2>=70?'#2e7d32':allAccuracyPct2>=40?'#e65100':'#c62828';
 
     function revenueCard(title, myRevenue, myPast, myAccuracy, myAccColor, allRevenue2, allPast, allAccuracy, allAccColor){
       var h='<div class="card" style="padding:14px"><div style="font-size:12px;font-weight:700;color:#4f46e5;margin-bottom:10px;border-bottom:1px solid #e0e0e0;padding-bottom:6px">'+title+'</div>';
@@ -2800,8 +2789,8 @@ async function loadAppointments(){
 
     html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">';
     html+=revenueCard('💰 הכנסות בוצעו',
-      confirmedRevenue,myDoneCount+' אושרו / '+myPendingCount+' ממתינים לאישור',accuracyPct,accuracyColor,
-      allRevenue,allDoneApptThisMonth.length+' אושרו / '+allPastUnconfirmedLeads.length+' ממתינים לאישור',allAccuracyPct,allAccuracyColor);
+      confirmedRevenue,myDoneCount+' מאומתים / '+myPendingCount+' מוערכים (800₪)',accuracyPct,accuracyColor,
+      allRevenue2,allConfirmedAppts.length+' מאומתים / '+allPastUnconfirmedLeads2.length+' מוערכים (800₪)',allAccuracyPct2,allAccuracyColor);
     html+=splitCard('💳 צפי הכנסות החודש',
       '&#8362; '+revenueEst.toLocaleString('he-IL'),myTotalApptCount+' תורים סה"כ',
       '&#8362; '+allEstimate.toLocaleString('he-IL'),allTotalCount+' תורים סה"כ',
@@ -3336,18 +3325,16 @@ async function loadIncome(){
   var thisMonthStart=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-01';
   function mStart(b){var d=new Date(now.getFullYear(),now.getMonth()-b,1);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01';}
 
-  // שלוף גם appointment_ids מלידים כדי לא לספור כפילויות
-  var[r0,r1,r2,r3,rd,rL,rApptIds]=await Promise.all([
+  var[r0,r1,r2,r3,rd,rL]=await Promise.all([
     db.from('appointments').select('id,doctor,deduction_amount,procedure_name,lead_id').eq('status','done').gte('date',thisMonthStart).lte('date',todayStr),
     db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(1)).lt('date',mStart(0)),
     db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(2)).lt('date',mStart(1)),
     db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(3)).lt('date',mStart(2)),
     db.from('doctors').select('name,specialty').order('name'),
-    db.from('leads').select('doctor,appointment_done,cancelled,lead_status,appointment_date,id').gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr),
-    db.from('appointments').select('lead_id').eq('status','done').gte('date',thisMonthStart).lte('date',todayStr)
+    db.from('leads').select('doctor,cancelled,lead_status,appointment_date,id').gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr)
   ]);
-  // מזהי לידים שיש להם appointment — לא נספור אותם פעמיים
-  var apptLeadIds=new Set((rApptIds.data||[]).map(function(a){return a.lead_id;}).filter(Boolean));
+  // מזהי לידים שיש להם appointment מאושר (למניעת כפל)
+  var apptLeadIds=new Set((r0.data||[]).map(function(a){return a.lead_id;}).filter(Boolean));
 
   // ======= מיפוי שמות רופאים =======
   // officialDoctors = רשימת השמות הרשמיים מ-doctors table
@@ -3410,33 +3397,18 @@ async function loadIncome(){
     return m;
   }
 
-  // לידים עם appointment_done=true שאין להם appointment — נוסיף כהכנסה בוצעה
-  var leadDoneByDoc={};
-  (rL.data||[]).forEach(function(l){
-    if(!l.appointment_done||l.cancelled||l.lead_status==='בוטל')return;
-    if(apptLeadIds.has(l.id))return; // כבר נספר ב-appointments
-    var d=matchDoctor(l.doctor);
-    if(!leadDoneByDoc[d])leadDoneByDoc[d]={rev:0,cnt:0,oh:0};
-    leadDoneByDoc[d].rev+=800; // הכנסה מוערכת
-    leadDoneByDoc[d].cnt++;
-    leadDoneByDoc[d].oh+=Math.round(800*DEFAULT_OVERHEAD);
-  });
-
+  // לידים ממתינים: lead_status='נקבע תור', תאריך עבר, לא בוטלו, אין appointment מאושר
+  // אלו מוערכים ב-800₪ כל אחד (לא נכנסים ל"וודאי", רק ל"מוערך")
   var pendByDoc={};
   (rL.data||[]).forEach(function(l){
-    if(l.appointment_done||l.cancelled||l.lead_status==='בוטל')return;
+    if(l.cancelled||l.lead_status==='בוטל')return;
+    if(l.lead_status!=='נקבע תור')return;
+    if(apptLeadIds.has(l.id))return; // כבר יש appointment מאושר — לא מוערך
     var d=matchDoctor(l.doctor);
     pendByDoc[d]=(pendByDoc[d]||0)+1;
   });
 
   var cur=agg(r0.data),p1=agg(r1.data),p2=agg(r2.data),p3=agg(r3.data);
-  // מזג לידים עם done לתוך cur
-  Object.keys(leadDoneByDoc).forEach(function(d){
-    if(!cur[d])cur[d]={rev:0,cnt:0,oh:0};
-    cur[d].rev+=leadDoneByDoc[d].rev;
-    cur[d].cnt+=leadDoneByDoc[d].cnt;
-    cur[d].oh+=leadDoneByDoc[d].oh;
-  });
 
   // רשימת רופאים — רק הרשמיים (+ כל מה שלא הוצמד)
   var docSet=new Set(officialDoctors);
@@ -3451,8 +3423,8 @@ async function loadIncome(){
   var totE=totC+totP,totN=totC-totOH;
   var mn=now.toLocaleDateString('he-IL',{month:'long',year:'numeric'});
   var h='<div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">';
-  h+='<div class="stat-card stat-green"><div class="stat-label">✅ וודאי ('+mn+')</div><div class="stat-val">₪'+totC.toLocaleString('he-IL')+'</div></div>';
-  h+='<div class="stat-card" style="border-right:3px solid #e65100;background:#fff3e0"><div class="stat-label">⏳ מוערך (כולל לא מאושרים)</div><div class="stat-val" style="color:#e65100">₪'+totE.toLocaleString('he-IL')+'</div></div>';
+  h+='<div class="stat-card stat-green"><div class="stat-label">✅ מאומת ('+mn+')</div><div class="stat-val">₪'+totC.toLocaleString('he-IL')+'</div></div>';
+  h+='<div class="stat-card" style="border-right:3px solid #e65100;background:#fff3e0"><div class="stat-label">⏳ מוערך (800₪ × '+Object.values(pendByDoc).reduce(function(s,v){return s+v;},0)+' תורים)</div><div class="stat-val" style="color:#e65100">₪'+totE.toLocaleString('he-IL')+'</div></div>';
   h+='<div class="stat-card stat-orange"><div class="stat-label">קיזוז ('+ohLabel()+')</div><div class="stat-val">₪'+totOH.toLocaleString('he-IL')+'</div></div>';
   h+='<div class="stat-card stat-blue"><div class="stat-label">נטו לחלוקה (וודאי)</div><div class="stat-val">₪'+totN.toLocaleString('he-IL')+'</div></div>';
   h+='</div>';
