@@ -1,4 +1,4 @@
-<!-- build: 1779623850 -->
+<!-- build: 1779690117 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -422,6 +422,48 @@ textarea.form-control{resize:vertical;min-height:65px}
       <textarea class="form-control" id="lf-notes-new" placeholder="הוסף הערה חדשה..." style="min-height:70px;font-family:inherit"></textarea>
       <div style="font-size:11px;color:#9e9e9e;margin-top:3px">ההערה תישמר עם תאריך, שעה ושם המטפל</div>
       <input type="hidden" id="lf-notes" />
+    </div>
+
+    <!-- שדות מידע נוסף על המטופל -->
+    <div style="border:1px solid #e8ecff;border-radius:10px;padding:12px;margin-bottom:10px;background:#fafbff">
+      <div style="font-size:13px;font-weight:700;color:#4f46e5;margin-bottom:10px">👤 פרטי מטופל נוספים</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>גיל</label>
+          <input class="form-control" type="number" id="lf-age" placeholder="גיל" min="0" max="120" />
+        </div>
+        <div class="form-group">
+          <label>עיר מגורים</label>
+          <input class="form-control" id="lf-city" placeholder="עיר מגורים" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>קופת חולים</label>
+          <select class="form-control" id="lf-kupat-holim">
+            <option value="">-- בחר קופ"ח --</option>
+            <option value="כללית">כללית</option>
+            <option value="מכבי">מכבי</option>
+            <option value="מאוחדת">מאוחדת</option>
+            <option value="לאומית">לאומית</option>
+            <option value="אין">אין / לא ידוע</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>חברת ביטוח</label>
+          <input class="form-control" id="lf-insurance-company" placeholder="מגדל, הראל, כלל..." />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>תאריך מפגש ראשון</label>
+          <input class="form-control" type="date" id="lf-first-visit" />
+        </div>
+        <div class="form-group">
+          <label>תאריך מפגש אחרון</label>
+          <input class="form-control" type="date" id="lf-last-visit" />
+        </div>
+      </div>
     </div>
 
     <!-- חלונית ביטול (מוצגת רק כשסטטוס=בוטל) -->
@@ -1557,6 +1599,12 @@ function openLeadNew(){
   qs('existing-banner').style.display='none';
   qs('phone-suggest').style.display='none';
   insuranceFlagActive=false;
+  qs('lf-age').value='';
+  qs('lf-city').value='';
+  qs('lf-kupat-holim').value='';
+  qs('lf-insurance-company').value='';
+  qs('lf-first-visit').value='';
+  qs('lf-last-visit').value='';
   var insBtn=document.getElementById('insurance-btn');if(insBtn){insBtn.style.background='';insBtn.style.borderColor='';}
   var insSt=document.getElementById('insurance-status');if(insSt)insSt.style.display='none';
   var delBtn2=document.getElementById('delete-lead-btn');if(delBtn2)delBtn2.style.display='none';
@@ -1599,6 +1647,12 @@ function openLeadEdit(id){
     qs('cancel-reason-wrap').style.display=['בוטל','בוטל שאגת הארי'].includes(l.lead_status)?'block':'none';
     qs('existing-banner').style.display='none';qs('phone-suggest').style.display='none';
     insuranceFlagActive=!!l.insurance_flag;
+    if(l.age)qs('lf-age').value=l.age;
+    if(l.city)qs('lf-city').value=l.city;
+    if(l.kupat_holim)qs('lf-kupat-holim').value=l.kupat_holim;
+    if(l.insurance_company)qs('lf-insurance-company').value=l.insurance_company;
+    if(l.first_visit_date)qs('lf-first-visit').value=l.first_visit_date;
+    if(l.last_visit_date)qs('lf-last-visit').value=l.last_visit_date;
     var insBtn=document.getElementById('insurance-btn'),insSt=document.getElementById('insurance-status');
     if(insBtn){insBtn.style.background=insuranceFlagActive?'#e8f5e9':'';insBtn.style.borderColor=insuranceFlagActive?'#43a047':'';}
     if(insSt)insSt.style.display=insuranceFlagActive?'inline':'none';
@@ -1716,6 +1770,12 @@ async function saveLead(){
   }
   const payload={
     insurance_flag:insuranceFlagActive,full_name:(fn+' '+ln).trim(),phone,
+    age:qs('lf-age').value?Number(qs('lf-age').value):null,
+    city:qs('lf-city').value.trim()||null,
+    kupat_holim:qs('lf-kupat-holim').value||null,
+    insurance_company:qs('lf-insurance-company').value.trim()||null,
+    first_visit_date:qs('lf-first-visit').value||null,
+    last_visit_date:qs('lf-last-visit').value||null,
     doctor:(qs('lf-doctor')?qs('lf-doctor').value.trim():null)||null,
     secretary,source:qs('lf-source').value||null,notes:finalNotes||null,
     appointment_date:qs('lf-appt-date').value||null,appointment_time:qs('lf-appt-time').value||null,
