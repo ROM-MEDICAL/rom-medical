@@ -1,4 +1,4 @@
-<!-- build: 1779784285 -->
+<!-- build: 1779803719 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -240,7 +240,19 @@ textarea.form-control{resize:vertical;min-height:65px}
         <div class="fg" id="custom-dates-wrap2" style="display:none">
           <label>עד תאריך</label><input type="date" id="f-to" onchange="filterLeads()" />
         </div>
-          <div class="fg" style="justify-content:flex-end"><button class="btn btn-outline btn-sm" onclick="clearFilters()">נקה</button></div>
+          <div class="fg" style="justify-content:flex-end;gap:6px;display:flex;align-items:center">
+            <button class="btn btn-outline btn-sm" onclick="clearFilters()">🧹 נקה</button>
+            <button class="btn btn-outline btn-sm" onclick="exportLeadsExcel()" style="color:#1d6f42;border-color:#1d6f42" title="ייצוא לאקסל">📥 Excel</button>
+            <button class="btn btn-outline btn-sm" onclick="printLeads()" style="color:#1565c0;border-color:#1565c0" title="הדפסה">🖨️ הדפסה</button>
+          </div>
+        </div>
+        <!-- שורת פעולות -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 8px 0">
+          <span id="leads-count" style="font-size:13px;color:#64748b;font-weight:500"></span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline btn-sm" onclick="exportLeadsExcel()" style="color:#1d6f42;border-color:#1d6f42;font-weight:600">📥 ייצוא Excel</button>
+            <button class="btn btn-outline btn-sm" onclick="printLeads()" style="color:#1565c0;border-color:#1565c0;font-weight:600">🖨️ הדפסה</button>
+          </div>
         </div>
         <div class="tbl-wrap" id="leads-table-wrap"><p style="color:#757575;text-align:center;padding:30px">טוען...</p></div>
 
@@ -1255,6 +1267,111 @@ function clearFilters(){
   ['f-search','f-from','f-to'].forEach(id=>qs(id).value='');
   ['f-doctor','f-secretary','f-status','f-source'].forEach(id=>qs(id).value='');
   qs('f-limit').value='14days';filterLeads();
+}
+
+function exportLeadsExcel(){
+  if(!filteredLeads||!filteredLeads.length){showToast('אין לידים לייצוא');return;}
+  var headers=['תאריך פנייה','שעת חזרה','שם פרטי','שם משפחה','טלפון','רופא מבוקש','סטטוס','מקור','מזכירה','הערות','תאריך תור','שעת תור'];
+  var rows=filteredLeads.map(function(l){
+    var parts=(l.full_name||'').split(' ');
+    var fn=parts[0]||'';var ln=parts.slice(1).join(' ')||'';
+    var apptTime=l.appointment_time?l.appointment_time.substring(0,5):'';
+    var retTime=l.return_time?l.return_time.substring(0,5):'';
+    return [
+      l.original_date||'',retTime,fn,ln,l.phone||'',
+      l.doctor||'',l.lead_status||'',l.source||'',
+      l.secretary||'',l.notes||'',
+      l.appointment_date||'',apptTime
+    ];
+  });
+
+  var ws=XLSX.utils.aoa_to_sheet([headers].concat(rows));
+
+  // Column widths
+  ws['!cols']=[{wch:12},{wch:8},{wch:12},{wch:14},{wch:14},{wch:24},{wch:16},{wch:12},{wch:10},{wch:30},{wch:12},{wch:8}];
+
+  // Style header row (bold, background)
+  var range=XLSX.utils.decode_range(ws['!ref']);
+  for(var C=range.s.c;C<=range.e.c;C++){
+    var addr=XLSX.utils.encode_cell({r:0,c:C});
+    if(!ws[addr])continue;
+    ws[addr].s={font:{bold:true},fill:{fgColor:{rgb:'4F46E5'}},alignment:{horizontal:'center'}};
+  }
+
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'לידים');
+
+  // Filename with current filter period
+  var lim=qs('f-limit')?qs('f-limit').value:'';
+  var periodLabel={'today':'היום','7days':'7_ימים','30days':'חודש_אחרון','custom':'מותאם','all':'הכל'}[lim]||lim;
+  var fname='לידים_'+periodLabel+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
+  XLSX.writeFile(wb,fname);
+  showToast('הקובץ הורד: '+fname);
+}
+
+function printLeads(){
+  if(!filteredLeads||!filteredLeads.length){showToast('אין לידים להדפסה');return;}
+
+  var lim=qs('f-limit')?qs('f-limit').value:'';
+  var periodLabel={'today':'היום','7days':'7 ימים אחרונים','30days':'חודש אחרון','custom':'טווח מותאם','all':'כל הלידים'}[lim]||lim;
+  var now=new Date().toLocaleDateString('he-IL');
+
+  var rows=filteredLeads.map(function(l,i){
+    var apptStr=l.appointment_date?(l.appointment_date+(l.appointment_time?' '+l.appointment_time.substring(0,5):'')):'';
+    var statusColor={'נקבע תור':'#1d6f42','הליד נסגר':'#1565c0','בוטל':'#c62828','נדרש המשך טיפול':'#e65100','ליד לא רלוונטי':'#757575'}[l.lead_status]||'#333';
+    return '<tr style="border-bottom:1px solid #eee;">'
+      +'<td style="padding:6px 8px;font-size:11px;color:#666">'+(i+1)+'</td>'
+      +'<td style="padding:6px 8px;font-size:11px">'+(l.original_date||'')+'</td>'
+      +'<td style="padding:6px 8px;font-size:12px;font-weight:500">'+(l.full_name||'')+'</td>'
+      +'<td style="padding:6px 8px;font-size:11px;direction:ltr">'+(l.phone||'')+'</td>'
+      +'<td style="padding:6px 8px;font-size:11px;max-width:160px">'+(l.doctor||'').replace('ד"ר ','')+'</td>'
+      +'<td style="padding:6px 8px"><span style="font-size:10px;font-weight:600;color:'+statusColor+';background:'+statusColor+'18;padding:2px 7px;border-radius:10px">'+(l.lead_status||'')+'</span></td>'
+      +'<td style="padding:6px 8px;font-size:11px;color:#1565c0">'+(apptStr)+'</td>'
+      +'<td style="padding:6px 8px;font-size:11px;color:#666">'+(l.secretary||'')+'</td>'
+      +'</tr>';
+  }).join('');
+
+  var html='<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8">'
+    +'<title>לידים — '+periodLabel+'</title>'
+    +'<style>'
+    +'body{font-family:Arial,sans-serif;direction:rtl;margin:0;padding:16px;color:#1e293b}'
+    +'.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:10px;border-bottom:2px solid #4f46e5}'
+    +'.title{font-size:18px;font-weight:700;color:#4f46e5}'
+    +'.meta{font-size:12px;color:#64748b}'
+    +'table{width:100%;border-collapse:collapse;font-size:12px}'
+    +'th{background:#4f46e5;color:white;padding:8px;font-weight:600;font-size:11px;text-align:right}'
+    +'tr:nth-child(even){background:#f8f9ff}'
+    +'.footer{margin-top:16px;font-size:11px;color:#94a3b8;text-align:center}'
+    +'@media print{'
+    +'  body{padding:8px}'
+    +'  @page{margin:10mm;size:A4 landscape}'
+    +'  .no-print{display:none}'
+    +'}'
+    +'</style></head><body>'
+    +'<div class="no-print" style="margin-bottom:12px">'
+    +'<button onclick="window.print()" style="padding:8px 20px;background:#4f46e5;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px">🖨️ הדפס</button>'
+    +'<button onclick="window.close()" style="margin-right:8px;padding:8px 20px;background:transparent;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-size:14px">סגור</button>'
+    +'</div>'
+    +'<div class="header">'
+    +'<div class="title">רשימת לידים — '+periodLabel+'</div>'
+    +'<div class="meta">הופק: '+now+' | סה"כ: '+filteredLeads.length+' לידים</div>'
+    +'</div>'
+    +'<table><thead><tr>'
+    +'<th style="width:30px">#</th>'
+    +'<th style="width:90px">תאריך</th>'
+    +'<th>שם מלא</th>'
+    +'<th style="width:110px">טלפון</th>'
+    +'<th>רופא</th>'
+    +'<th style="width:110px">סטטוס</th>'
+    +'<th style="width:120px">תאריך תור</th>'
+    +'<th style="width:70px">מזכירה</th>'
+    +'</tr></thead><tbody>'+rows+'</tbody></table>'
+    +'<div class="footer">רום מדיקל — '+now+'</div>'
+    +'</body></html>';
+
+  var win=window.open('','_blank','width=1000,height=700');
+  win.document.write(html);
+  win.document.close();
 }
 
 function renderLeadsTable(){
