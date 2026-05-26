@@ -1,4 +1,4 @@
-<!-- build: 1779690117 -->
+<!-- build: 1779781347 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1494,6 +1494,7 @@ async function checkReturningCustomer(phone){
   showReturningCustomerPopup(matches);
 }
 function showReturningCustomerPopup(matches){
+  if(!isPopupEnabled('appt_reminder'))return;
   var old=document.getElementById('returning-popup');if(old)old.remove();
   var overlay=document.createElement('div');overlay.id='returning-popup';
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:500;display:flex;align-items:center;justify-content:center';
@@ -3804,6 +3805,26 @@ var MODS_DEF=[
   {id:'doctorinfo',label:'👨‍⚕️ מידע רופאים'},{id:'admin',label:'⚙️ ADMIN'}
 ];
 
+// הגדרת חלוניות קופצות
+var POPUPS_DEF=[
+  {id:'appt_reminder',   label:'🔔 תזכורת תאריך תור עבר (לאישור)'},
+  {id:'appt_confirm',    label:'✅ אישור ביצוע תור וסכום'},
+  {id:'tipulog_mismatch',label:'⚠️ תור שלא הופיע בטיפולוג'},
+  {id:'new_lead',        label:'🆕 ליד חדש נכנס'},
+  {id:'birthday',        label:'🎂 תזכורת יום הולדת מטופל'},
+];
+
+// בדוק האם popup מופעל למשתמש הנוכחי
+function isPopupEnabled(popupId){
+  if(!currentProfile)return false;
+  var isSec=Array.isArray(currentProfile.roles)&&currentProfile.roles.includes('secretary');
+  // ברירת מחדל: מזכירה רואה הכל, שאר לא רואים
+  var defaults=isSec?POPUPS_DEF.map(function(p){return p.id;}):[];
+  var allowed=currentProfile.allowed_popups;
+  if(!allowed||!Array.isArray(allowed)||allowed.length===0)return defaults.includes(popupId);
+  return allowed.includes(popupId);
+}
+
 async function openUserEdit(btn){
   var uid=btn.getAttribute('data-uid');
   var res=await db.from('profiles').select('*').eq('id',uid).single();
@@ -3901,6 +3922,37 @@ async function openUserEdit(btn){
     mb3.appendChild(lbl);
   });
   mc.appendChild(mb3);pr.appendChild(mc);modal.appendChild(pr);
+
+  // ===== הגדרות חלוניות קופצות =====
+  var allowedPopups=(u.allowed_popups&&Array.isArray(u.allowed_popups)&&u.allowed_popups.length>0)
+    ?u.allowed_popups
+    // ברירת מחדל: מזכירות רואות הכל, שאר לא
+    :(roles.includes('secretary')?POPUPS_DEF.map(function(p){return p.id;}):[]);
+
+  var pc=document.createElement('div');
+  pc.style.cssText='background:#f8f9ff;border-radius:10px;padding:14px;margin-top:12px;border:1px solid #e8ecff';
+  pc.innerHTML='<div style="font-size:13px;font-weight:700;color:#4f46e5;margin-bottom:10px">🔔 חלוניות קופצות</div>'
+    +'<div style="font-size:11px;color:#64748b;margin-bottom:8px">ברירת מחדל: מזכירות רואות הכל, שאר המשתמשים לא. ניתן לשנות כאן.</div>';
+
+  var pb=document.createElement('div');pb.style.cssText='display:flex;gap:6px;margin-bottom:8px';
+  var psa=document.createElement('button');psa.type='button';psa.className='btn btn-outline btn-sm';psa.textContent='הפעל הכל';
+  psa.onclick=function(){document.querySelectorAll('.popup-cb').forEach(function(c){c.checked=true;});};
+  var pcl=document.createElement('button');pcl.type='button';pcl.className='btn btn-outline btn-sm';pcl.textContent='כבה הכל';
+  pcl.onclick=function(){document.querySelectorAll('.popup-cb').forEach(function(c){c.checked=false;});};
+  pb.appendChild(psa);pb.appendChild(pcl);pc.appendChild(pb);
+
+  var pg=document.createElement('div');pg.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:6px';
+  POPUPS_DEF.forEach(function(p){
+    var lbl=document.createElement('label');
+    lbl.style.cssText='display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;background:white;padding:6px 8px;border-radius:6px;border:1px solid #e8ecff';
+    var inp=document.createElement('input');
+    inp.type='checkbox';inp.className='popup-cb';inp.value=p.id;
+    inp.checked=allowedPopups.includes(p.id);
+    lbl.appendChild(inp);lbl.appendChild(document.createTextNode(p.label));
+    pg.appendChild(lbl);
+  });
+  pc.appendChild(pg);modal.appendChild(pc);
+
   var ar=document.createElement('div');ar.style.cssText='display:flex;gap:10px;margin-top:12px';
   var sv=document.createElement('button');sv.className='btn btn-primary';sv.textContent='שמור שינויים';
   sv.onclick=function(){saveUserEdit(uid);};
@@ -3920,13 +3972,16 @@ async function saveUserEdit(uid){
   var doctorLinkSel=document.getElementById('ue-doctor-link');
   var linkedDoctorId=doctorLinkSel?doctorLinkSel.value||null:null;
   var linkedDoctorName=doctorLinkSel&&doctorLinkSel.selectedIndex>0?doctorLinkSel.options[doctorLinkSel.selectedIndex].text:null;
+  var popups=[...document.querySelectorAll('.popup-cb:checked')].map(function(c){return c.value;});
   var payload={
     display_name:dispName||linkedDoctorName||null,
     linked_doctor_id:linkedDoctorId,
     first_name_he:fnHe||null,last_name_he:lnHe||null,
     first_name_en:fnEn||null,last_name_en:lnEn||null,
     roles:roles.length?roles:['secretary'],
-    allowed_modules:mods,role:roles[0]||'secretary'
+    allowed_modules:mods,
+    allowed_popups:popups,
+    role:roles[0]||'secretary'
   };
   if(fullName)payload.full_name=fullName;
   var r=await db.from('profiles').update(payload).eq('id',uid);
@@ -4093,7 +4148,7 @@ function openDoctorInfoModal(d){
 
 var allUsers=[];
 async function loadAllUsers(){
-  const{data}=await db.from('profiles').select('id,display_name,full_name,role,roles,linked_doctor_id,linked_doctor_name,track_attendance,allowed_modules').order('display_name');
+  const{data}=await db.from('profiles').select('id,display_name,full_name,role,roles,linked_doctor_id,linked_doctor_name,track_attendance,allowed_modules,allowed_popups').order('display_name');
   allUsers=(data||[]).filter(function(u){return u.display_name||u.full_name;});
 }
 
@@ -4924,6 +4979,7 @@ async function showCompletionPopup(lead){
     return !p.doctors||(docBase&&p.doctors.includes(docBase));
   });
 
+  if(!isPopupEnabled('appt_confirm'))return;
   var old=document.getElementById('completion-popup');if(old)old.remove();
   var overlay=document.createElement('div');
   overlay.id='completion-popup';
@@ -6365,6 +6421,7 @@ function showApptNotification(lead){
 }
 
 async function showCompletionPopup(lead){
+  if(!isPopupEnabled('appt_confirm'))return;
   var old=document.getElementById('completion-popup');if(old)old.remove();
   var{data:procsData}=await db.from('procedures').select('*').order('category').order('name');
   var doctorBase=(lead.doctor||'').replace('ד"ר','').split('(')[0].trim();
