@@ -1,4 +1,4 @@
-<!-- build: 1779781347 -->
+<!-- build: 1779782751 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -4760,6 +4760,56 @@ async function openUserModal(uid,docsArg){
   });
   docLinkG.appendChild(docSel);modal.appendChild(docLinkG);
 
+  // ===== מודולים זמינים =====
+  var modsAllowed=(u&&u.allowed_modules&&u.allowed_modules.length>0)
+    ?u.allowed_modules:MODS_DEF.map(function(m){return m.id;});
+  var modsG=document.createElement('div');
+  modsG.style.cssText='background:#f8f9ff;border-radius:10px;padding:14px;margin-bottom:10px;border:1px solid #e8ecff';
+  modsG.innerHTML='<div style="font-size:13px;font-weight:700;color:#4f46e5;margin-bottom:8px">📋 מודולים זמינים</div>';
+  var mBtns=document.createElement('div');mBtns.style.cssText='display:flex;gap:6px;margin-bottom:8px';
+  var mAll=document.createElement('button');mAll.type='button';mAll.className='btn btn-outline btn-sm';mAll.textContent='בחר הכל';
+  mAll.onclick=function(){document.querySelectorAll('#user-modal-wrap .mod-cb').forEach(function(c){c.checked=true;});};
+  var mNone=document.createElement('button');mNone.type='button';mNone.className='btn btn-outline btn-sm';mNone.textContent='נקה הכל';
+  mNone.onclick=function(){document.querySelectorAll('#user-modal-wrap .mod-cb').forEach(function(c){c.checked=false;});};
+  mBtns.appendChild(mAll);mBtns.appendChild(mNone);modsG.appendChild(mBtns);
+  var mGrid=document.createElement('div');mGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:4px';
+  MODS_DEF.forEach(function(m){
+    var lbl=document.createElement('label');
+    lbl.style.cssText='display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;background:white;padding:5px 8px;border-radius:6px;border:1px solid #e8ecff';
+    var inp=document.createElement('input');inp.type='checkbox';inp.className='mod-cb';inp.value=m.id;
+    inp.checked=modsAllowed.includes(m.id);
+    lbl.appendChild(inp);lbl.appendChild(document.createTextNode(m.label));
+    mGrid.appendChild(lbl);
+  });
+  modsG.appendChild(mGrid);modal.appendChild(modsG);
+
+  // ===== חלוניות קופצות =====
+  var uRoles=u&&Array.isArray(u.roles)?u.roles:[u&&u.role||'secretary'];
+  var isSec=uRoles.includes('secretary');
+  var popupsAllowed=(u&&u.allowed_popups&&Array.isArray(u.allowed_popups)&&u.allowed_popups.length>0)
+    ?u.allowed_popups
+    :(isSec?POPUPS_DEF.map(function(p){return p.id;}):[]);
+  var popG=document.createElement('div');
+  popG.style.cssText='background:#f8f9ff;border-radius:10px;padding:14px;margin-bottom:12px;border:1px solid #e8ecff';
+  popG.innerHTML='<div style="font-size:13px;font-weight:700;color:#4f46e5;margin-bottom:6px">🔔 חלוניות קופצות</div>'
+    +'<div style="font-size:11px;color:#64748b;margin-bottom:8px">ברירת מחדל: מזכירות — הכל פעיל | שאר — כבוי</div>';
+  var pBtns=document.createElement('div');pBtns.style.cssText='display:flex;gap:6px;margin-bottom:8px';
+  var pAll=document.createElement('button');pAll.type='button';pAll.className='btn btn-outline btn-sm';pAll.textContent='הפעל הכל';
+  pAll.onclick=function(){document.querySelectorAll('#user-modal-wrap .popup-cb').forEach(function(c){c.checked=true;});};
+  var pNone=document.createElement('button');pNone.type='button';pNone.className='btn btn-outline btn-sm';pNone.textContent='כבה הכל';
+  pNone.onclick=function(){document.querySelectorAll('#user-modal-wrap .popup-cb').forEach(function(c){c.checked=false;});};
+  pBtns.appendChild(pAll);pBtns.appendChild(pNone);popG.appendChild(pBtns);
+  var pGrid=document.createElement('div');pGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:4px';
+  POPUPS_DEF.forEach(function(p){
+    var lbl=document.createElement('label');
+    lbl.style.cssText='display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;background:white;padding:5px 8px;border-radius:6px;border:1px solid #e8ecff';
+    var inp=document.createElement('input');inp.type='checkbox';inp.className='popup-cb';inp.value=p.id;
+    inp.checked=popupsAllowed.includes(p.id);
+    lbl.appendChild(inp);lbl.appendChild(document.createTextNode(p.label));
+    pGrid.appendChild(lbl);
+  });
+  popG.appendChild(pGrid);modal.appendChild(popG);
+
   // Buttons
   var btnRow=document.createElement('div');btnRow.style.cssText='display:flex;gap:10px;align-items:center;margin-top:4px';
   var saveBtn=document.createElement('button');saveBtn.className='btn btn-primary';saveBtn.textContent='שמור';
@@ -4800,13 +4850,18 @@ async function saveUserModal(uid){
     docName=docOpt?docOpt.textContent.split(' (')[0]:'';
   }
 
+  var mods=[...document.querySelectorAll('#user-modal-wrap .mod-cb:checked')].map(function(c){return c.value;});
+  var popups=[...document.querySelectorAll('#user-modal-wrap .popup-cb:checked')].map(function(c){return c.value;});
+
   var payload={
     full_name:fullName||null,
     display_name:secName||displayName||null,
     role:role,
     roles:allRoles,
     linked_doctor_id:docId||null,
-    linked_doctor_name:docName||null
+    linked_doctor_name:docName||null,
+    allowed_modules:mods.length?mods:MODS_DEF.map(function(m){return m.id;}),
+    allowed_popups:popups
   };
 
   var error;
