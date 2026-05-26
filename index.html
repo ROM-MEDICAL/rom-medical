@@ -1,4 +1,4 @@
-<!-- build: 1779805739 -->
+<!-- build: 1779806078 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -5425,16 +5425,17 @@ async function loadAppointmentsLog(){
   wrap.innerHTML='<p style="color:#757575;text-align:center;padding:16px">טוען...</p>';
 
   var now=new Date();
-  var todayStr=now.toISOString().slice(0,10);
+  function pad(n){return n<10?'0'+n:n;}
+  var todayStr=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
   var dateFrom=null,dateTo=todayStr;
 
   if(_logPeriod==='today'){
     dateFrom=todayStr;
   } else if(_logPeriod==='week'){
     var wStart=new Date(now);wStart.setDate(now.getDate()-now.getDay());
-    dateFrom=wStart.toISOString().slice(0,10);
+    dateFrom=wStart.getFullYear()+'-'+pad(wStart.getMonth()+1)+'-'+pad(wStart.getDate());
   } else if(_logPeriod==='month'){
-    dateFrom=now.toISOString().slice(0,7)+'-01';
+    dateFrom=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-01';
   } else if(_logPeriod==='custom'){
     var df=document.getElementById('log-date-from');var dt=document.getElementById('log-date-to');
     if(df&&df.value)dateFrom=df.value;
@@ -5443,67 +5444,40 @@ async function loadAppointmentsLog(){
 
   var searchQ=(document.getElementById('log-search').value||'').trim().toLowerCase().replace(/-/g,'');
 
-  // === מקור 1: טבלת appointments (status=done) ===
-  var q1=db.from('appointments')
-    .select('id,patient_name,patient_phone,doctor,date,time,status,deduction_amount,procedure_name,notes,edited_at,lead_id')
-    .eq('status','done')
-    .order('date',{ascending:false});
-  if(dateFrom)q1=q1.gte('date',dateFrom);
-  if(dateTo)q1=q1.lte('date',dateTo);
-  if(_logPeriod==='all')q1=q1.limit(500);
-  var r1=await q1;
-  var appts1=(r1.data||[]).map(function(a){
-    return {
-      id:'appt_'+a.id, _src:'appointments',
-      patient_name:a.patient_name,patient_phone:a.patient_phone,
-      doctor:a.doctor,date:a.date,time:a.time,
-      deduction_amount:a.deduction_amount,
-      procedure_name:a.procedure_name,notes:a.notes,
-      _appt_id:a.id, lead_id:a.lead_id,
-      // אימות: appointment = ידני על ידי מזכירה
-      _confirm_type:'manual'
-    };
-  });
-
-  // === מקור 2: טבלת leads (appointment_done=true) ===
-  var q2=db.from('leads')
-    .select('id,full_name,phone,doctor,appointment_date,appointment_time,deduction_amount,notes,source,secretary,lead_status')
+  // מקור יחיד: leads עם appointment_done=true
+  // תואם בדיוק לחישוב ההכנסות
+  var q=db.from('leads')
+    .select('id,full_name,phone,doctor,appointment_date,appointment_time,deduction_amount,notes,source,secretary')
     .eq('appointment_done',true)
-    .order('appointment_date',{ascending:false});
-  if(dateFrom)q2=q2.gte('appointment_date',dateFrom);
-  if(dateTo)q2=q2.lte('appointment_date',dateTo);
-  if(_logPeriod==='all')q2=q2.limit(500);
-  var r2=await q2;
+    .order('appointment_date',{ascending:false})
+    .order('appointment_time',{ascending:false});
+  if(dateFrom)q=q.gte('appointment_date',dateFrom);
+  if(dateTo)q=q.lte('appointment_date',dateTo);
+  if(_logPeriod==='all')q=q.limit(1000);
 
-  // IDs שכבר קיימים מ-appointments (כדי לא לכפול)
-  var apptLeadIds=new Set(appts1.filter(function(a){return a.lead_id;}).map(function(a){return a.lead_id;}));
-
-  var appts2=(r2.data||[]).filter(function(l){
-    return !apptLeadIds.has(l.id);
-  }).map(function(l){
-    var isTipulog=l.source==='טיפולוג';
+  var resp=await q;
+  var rows=(resp.data||[]).map(function(l){
+    // טיפולוג = source='טיפולוג'
+    // ידני = אושר על ידי מזכירה (כל מקור אחר)
+    var isTipulog=(l.source==='טיפולוג');
     return {
-      id:'lead_'+l.id, _src:'leads', _lead_id:l.id,
-      patient_name:l.full_name,patient_phone:l.phone,
-      doctor:l.doctor,date:l.appointment_date,
+      id:'lead_'+l.id,
+      patient_name:l.full_name,
+      patient_phone:l.phone,
+      doctor:l.doctor,
+      date:l.appointment_date,
       time:l.appointment_time,
       deduction_amount:l.deduction_amount,
-      procedure_name:null,notes:l.notes,
-      _confirm_type:isTipulog?'tipulog':'manual'
+      notes:l.notes,
+      procedure_name:null,
+      _confirm_type:isTipulog?'tipulog':'manual',
+      _lead_id:l.id
     };
-  });
-
-  // מיזוג + מיון לפי תאריך
-  var combined=appts1.concat(appts2);
-  combined.sort(function(a,b){
-    var d=new Date(b.date||0)-new Date(a.date||0);
-    if(d!==0)return d;
-    return (b.time||'').localeCompare(a.time||'');
   });
 
   // חיפוש
   if(searchQ){
-    combined=combined.filter(function(a){
+    rows=rows.filter(function(a){
       var name=(a.patient_name||'').toLowerCase();
       var phone=(a.patient_phone||'').replace(/-/g,'');
       var date=(a.date||'');
@@ -5511,7 +5485,7 @@ async function loadAppointmentsLog(){
     });
   }
 
-  allAppointmentsLog=combined;
+  allAppointmentsLog=rows;
   renderAppointmentsLog(allAppointmentsLog);
 }
 
