@@ -1,4 +1,4 @@
-<!-- build: 1779805494 -->
+<!-- build: 1779805739 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -3572,42 +3572,44 @@ async function loadIncome(){
   var thisMonthStart=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-01';
   function mStart(b){var d=new Date(now.getFullYear(),now.getMonth()-b,1);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01';}
 
-  var[r0,r1,r2,r3,rd,rL,rLD]=await Promise.all([
-    db.from('appointments').select('id,doctor,deduction_amount,procedure_name,lead_id').eq('status','done').gte('date',thisMonthStart).lte('date',todayStr),
-    db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(1)).lt('date',mStart(0)),
-    db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(2)).lt('date',mStart(1)),
-    db.from('appointments').select('doctor,deduction_amount,procedure_name').eq('status','done').gte('date',mStart(3)).lt('date',mStart(2)),
+  // מקור יחיד לחישוב הכנסות: leads.deduction_amount (הטיפולוג)
+  // appointments משמשת רק לרשימת הממתינים לאישור
+  var[rd,rL,rL1,rL2,rL3,rLpend]=await Promise.all([
     db.from('doctors').select('name,specialty').order('name'),
-    db.from('leads').select('doctor,cancelled,lead_status,appointment_date,appointment_done,appointment_confirmed,id,deduction_amount').gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr),
-    // חודשים קודמים מ-leads (לממוצע)
-    db.from('leads').select('doctor,deduction_amount,appointment_date,appointment_done,id').eq('appointment_done',true).gte('appointment_date',mStart(3)).lt('appointment_date',mStart(0))
+    // חודש נוכחי — תורים עם סכום
+    db.from('leads').select('id,doctor,deduction_amount,appointment_date,appointment_done,cancelled,lead_status,appointment_confirmed')
+      .gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr),
+    // חודש -1
+    db.from('leads').select('doctor,deduction_amount,appointment_done')
+      .eq('appointment_done',true).neq('deduction_amount',null)
+      .gte('appointment_date',mStart(1)).lt('appointment_date',mStart(0)),
+    // חודש -2
+    db.from('leads').select('doctor,deduction_amount,appointment_done')
+      .eq('appointment_done',true).neq('deduction_amount',null)
+      .gte('appointment_date',mStart(2)).lt('appointment_date',mStart(1)),
+    // חודש -3
+    db.from('leads').select('doctor,deduction_amount,appointment_done')
+      .eq('appointment_done',true).neq('deduction_amount',null)
+      .gte('appointment_date',mStart(3)).lt('appointment_date',mStart(2)),
+    // ממתינים לאימות (תאריך עבר, לא בוטל, לא אומת)
+    db.from('leads').select('id,doctor,lead_status,cancelled,appointment_done,appointment_confirmed,appointment_date')
+      .gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr)
   ]);
-  // מזהי לידים שיש להם appointment מאושר (למניעת כפל)
-  var apptLeadIds=new Set((r0.data||[]).map(function(a){return a.lead_id;}).filter(Boolean));
 
-  // הוסף תורים מאומתים מ-leads (tipulog) שאין להם appointment בטבלה
-  var leadsConfirmedCur=(rL.data||[]).filter(function(l){
-    return l.appointment_done&&!apptLeadIds.has(l.id)&&l.deduction_amount>0;
+  // apptLeadIds לא רלוונטי יותר — מקור יחיד
+  var apptLeadIds=new Set();
+
+  // מאומת = leads עם appointment_done=true + deduction_amount
+  var confirmedCur=(rL.data||[]).filter(function(l){
+    return l.appointment_done&&l.deduction_amount>0&&!l.cancelled;
   }).map(function(l){
-    return {doctor:l.doctor,deduction_amount:l.deduction_amount,procedure_name:null,lead_id:l.id};
+    return {doctor:l.doctor,deduction_amount:l.deduction_amount,procedure_name:null};
   });
 
-  // מיזוג עם appointments הנוכחיים
-  var r0merged={data:(r0.data||[]).concat(leadsConfirmedCur)};
-
-  // עדכן apptLeadIds כדי שלא יחשב שוב ב-pending
-  leadsConfirmedCur.forEach(function(l){apptLeadIds.add(l.lead_id);});
-
-  // ממוצע חודשים קודמים — הוסף מ-leads
-  var pastLeads=rLD.data||[];
-  function pastLeadsByMonth(startStr,endStr){
-    return pastLeads.filter(function(l){
-      return l.appointment_date>=startStr&&l.appointment_date<endStr&&l.appointment_done&&l.deduction_amount>0;
-    }).map(function(l){return {doctor:l.doctor,deduction_amount:l.deduction_amount,procedure_name:null};});
-  }
-  var r1merged={data:(r1.data||[]).concat(pastLeadsByMonth(mStart(1),mStart(0)))};
-  var r2merged={data:(r2.data||[]).concat(pastLeadsByMonth(mStart(2),mStart(1)))};
-  var r3merged={data:(r3.data||[]).concat(pastLeadsByMonth(mStart(3),mStart(2)))};
+  var r0merged={data:confirmedCur};
+  var r1merged={data:(rL1.data||[]).map(function(l){return {doctor:l.doctor,deduction_amount:l.deduction_amount,procedure_name:null};})};
+  var r2merged={data:(rL2.data||[]).map(function(l){return {doctor:l.doctor,deduction_amount:l.deduction_amount,procedure_name:null};})};
+  var r3merged={data:(rL3.data||[]).map(function(l){return {doctor:l.doctor,deduction_amount:l.deduction_amount,procedure_name:null};})};
 
   // ======= מיפוי שמות רופאים =======
   // officialDoctors = רשימת השמות הרשמיים מ-doctors table
@@ -3670,16 +3672,13 @@ async function loadIncome(){
     return m;
   }
 
-  // ממתינים: לא אומת בשום צורה:
-  // lead_status='נקבע תור' + תאריך עבר + לא בוטל
-  // + appointment_done=false + appointment_confirmed=false + אין appointment בטבלה
+  // ממתינים: תאריך עבר, לא בוטל, לא אומת
   var pendByDoc={};
-  (rL.data||[]).forEach(function(l){
-    if(!l.appointment_date||l.appointment_date>=todayStr)return; // רק עבר
+  (rLpend.data||[]).forEach(function(l){
+    if(!l.appointment_date||l.appointment_date>=todayStr)return;
     if(l.cancelled||l.lead_status==='בוטל')return;
     if(l.lead_status!=='נקבע תור')return;
-    if(l.appointment_done||l.appointment_confirmed)return; // כבר אומת
-    if(apptLeadIds.has(l.id))return; // יש appointment מאושר
+    if(l.appointment_done||l.appointment_confirmed)return;
     var d=matchDoctor(l.doctor);
     pendByDoc[d]=(pendByDoc[d]||0)+1;
   });
