@@ -1,4 +1,4 @@
-<!-- build: 1779806078 -->
+<!-- build: 1779974729 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2643,16 +2643,19 @@ async function loadAppointments(){
   var MAY_START=thisMonthStart;
   var nowTime=now.getHours()*60+now.getMinutes();
   var pendingConfirm=allLeadsData.filter(function(l){
-    if(!l.appointment_date||!l.appointment_time)return false;
+    if(!l.appointment_date)return false;
     if(l.appointment_date<MAY_START)return false;
     if(l.cancelled||l.lead_status==='בוטל')return false;
-    if(l.appointment_confirmed)return false;
-    // תור שעבר — תאריך לפני היום, או היום אחרי שעת התור+30 דקות
+    if(l.appointment_done||l.appointment_confirmed)return false;
+    // תור שתאריכו לפני היום — ממתין בהחלט
     if(l.appointment_date<todayStr)return true;
+    // תור של היום — ממתין רק אם שעתו עברה (או אין שעה)
     if(l.appointment_date===todayStr){
+      if(!l.appointment_time)return true;
       var parts=String(l.appointment_time).slice(0,5).split(':');
       var apptMins=parseInt(parts[0])*60+parseInt(parts[1]||0);
-      return nowTime>=apptMins+30;
+      // ממתין אם השעה + 15 דקות עברה (הורדנו ל-15 במקום 30)
+      return nowTime>=apptMins+15;
     }
     return false;
   });
@@ -2807,23 +2810,23 @@ async function loadAppointments(){
   // מוערך  = מאומת + לידים שתאריכם עבר ולא אומתו × 800₪  (עד היום)
   // צפי    = מוערך + לידים עתידיים עד סוף החודש × 800₪
 
-  // מזהי לידים שיש להם appointment מאושר — למניעת כפל
+  // מזהי לידים שיש להם appointment מאושר — לפונקציית isUnconfirmed
   var confirmedLeadIds=new Set(
     appts.filter(function(a){return a.status==='done'&&a.lead_id;})
          .map(function(a){return a.lead_id;})
   );
 
-  // --- 1. מאומת: appointments.status='done' בלבד ---
-  var myConfirmedAppts=myAppts.filter(function(a){
-    return a.status==='done'&&a.date&&a.date>=thisMonthStart&&a.date<=todayStr;
+  // --- 1. מאומת: leads.appointment_done=true (מקור יחיד — זהה לתורים ומעקב) ---
+  var myConfirmedAppts=leads.filter(function(l){
+    return l.appointment_done&&l.appointment_date>=thisMonthStart&&l.appointment_date<=todayStr;
   });
-  var allConfirmedAppts=appts.filter(function(a){
-    return a.status==='done'&&a.date&&a.date>=thisMonthStart&&a.date<=todayStr;
+  var allConfirmedAppts=leadsAll.filter(function(l){
+    return l.appointment_done&&l.appointment_date>=thisMonthStart&&l.appointment_date<=todayStr;
   });
   var myConfirmedRevenue=0;
-  myConfirmedAppts.forEach(function(a){myConfirmedRevenue+=Number(a.deduction_amount||0);});
+  myConfirmedAppts.forEach(function(l){myConfirmedRevenue+=Number(l.deduction_amount||0);});
   var allConfirmedRevenue=0;
-  allConfirmedAppts.forEach(function(a){allConfirmedRevenue+=Number(a.deduction_amount||0);});
+  allConfirmedAppts.forEach(function(l){allConfirmedRevenue+=Number(l.deduction_amount||0);});
 
   // --- 2. ממתינים לאימות: תאריך עבר + לא אומת בשום צורה ---
   // תנאי: lead_status='נקבע תור' + לא בוטל + appointment_done=false + appointment_confirmed=false
@@ -2839,7 +2842,27 @@ async function loadAppointments(){
     return l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr&&isUnconfirmed(l);
   });
   var allPastUnconfirmed=leadsAll.filter(function(l){
-    return l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr&&isUnconfirmed(l);
+    if(!isUnconfirmed(l))return false;
+    if(l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr)return true;
+    // היום — אם שעת התור + 15 דקות עברה
+    if(l.appointment_date===todayStr){
+      if(!l.appointment_time)return true;
+      var parts=String(l.appointment_time).slice(0,5).split(':');
+      var apptMins=parseInt(parts[0])*60+parseInt(parts[1]||0);
+      return nowTime>=apptMins+15;
+    }
+    return false;
+  });
+  var myPastUnconfirmed=leads.filter(function(l){
+    if(!isUnconfirmed(l))return false;
+    if(l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr)return true;
+    if(l.appointment_date===todayStr){
+      if(!l.appointment_time)return true;
+      var parts=String(l.appointment_time).slice(0,5).split(':');
+      var apptMins=parseInt(parts[0])*60+parseInt(parts[1]||0);
+      return nowTime>=apptMins+15;
+    }
+    return false;
   });
 
   // --- 3. עתידיים: תאריך מחר עד סוף החודש, לא אומת ---
