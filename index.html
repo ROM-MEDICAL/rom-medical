@@ -1,4 +1,4 @@
-<!-- build: 1780205472 -->
+<!-- build: 1780208507 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -5292,18 +5292,55 @@ async function checkApptNotifications(){
   var myR2=(myU2&&myU2.roles)||[];
   var isDocOnly2=(myR2.includes('doctor')&&!myR2.includes('admin')&&!myR2.includes('secretary'))||currentRole==='doctor';
   if(isDocOnly2)return;
+  if(!isPopupEnabled('appt_confirm'))return;
 
   var now=new Date();
-  var todayStr=now.toISOString().slice(0,10);
+  function pad(n){return n<10?'0'+n:n;}
+  var todayStr=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
   var currentMins=now.getHours()*60+now.getMinutes();
   var currentTime=now.toTimeString().slice(0,5);
 
+  // בדוק תורים מהיום
   var{data:todayLeads}=await db.from('leads')
-    .select('id,full_name,appointment_time,doctor,appointment_date,lead_status,phone,appointment_done,appointment_confirmed')
+    .select('id,full_name,appointment_time,doctor,appointment_date,lead_status,phone,appointment_done,appointment_confirmed,deduction_amount,source,secretary')
     .eq('appointment_date',todayStr)
     .not('lead_status','eq','בוטל')
     .eq('cancelled',false);
   if(!todayLeads)return;
+
+  // בדוק גם תורים מימים קודמים שלא אושרו (עד 7 ימים אחורה)
+  var pastDate=new Date(now);pastDate.setDate(pastDate.getDate()-7);
+  function pad2(n){return n<10?'0'+n:n;}
+  var pastStr=pastDate.getFullYear()+'-'+pad2(pastDate.getMonth()+1)+'-'+pad2(pastDate.getDate());
+  var{data:pastLeads}=await db.from('leads')
+    .select('id,full_name,appointment_time,doctor,appointment_date,lead_status,phone,appointment_done,appointment_confirmed,deduction_amount,source,secretary')
+    .gte('appointment_date',pastStr)
+    .lt('appointment_date',todayStr)
+    .eq('lead_status','נקבע תור')
+    .eq('cancelled',false)
+    .eq('appointment_done',false);
+  // הצג חלונית לתורי עבר שלא אושרו (עד 3 בכל פעם)
+  if(pastLeads&&pastLeads.length>0){
+    var toShow=pastLeads.filter(function(l){return !completionNotified.has(l.id);}).slice(0,3);
+    if(toShow.length>0&&!window._pastPopupShown){
+      window._pastPopupShown=true;
+      var idx=0;
+      function showNext(){
+        if(idx>=toShow.length)return;
+        var lead=toShow[idx++];
+        completionNotified.add(lead.id);
+        showApptConfirmModal(lead,function(amount){
+          var upd={appointment_confirmed:true,appointment_done:true};
+          if(amount&&parseFloat(amount)>0)upd.deduction_amount=parseFloat(amount);
+          db.from('leads').update(upd).eq('id',lead.id).then(function(){
+            if(typeof loadAppointmentsLog==='function')loadAppointmentsLog();
+            setTimeout(showNext,500);
+          });
+        },0);
+      }
+      showNext();
+    }
+  }
 
   var unconfirmed=[];
   todayLeads.forEach(function(l){
