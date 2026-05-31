@@ -1,4 +1,4 @@
-<!-- build: 1780156228 -->
+<!-- build: 1780205472 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2361,7 +2361,7 @@ async function addTaskComment(taskId,text,callback){
   try{comments=Array.isArray(task.comments)?task.comments:(task.comments?JSON.parse(task.comments):[]);}catch(e){}
   comments.push({author:myName,text:text,time:new Date().toISOString()});
   await db.from('tasks').update({comments:comments}).eq('id',taskId);
-  if(callback)callback();
+  if(callback)callback(price);
 }
 async function completeTask(id){await db.from('tasks').update({status:'done'}).eq('id',id);showToast('הושלם ✓');loadTasks();loadDashboard();}
 async function openTaskModal(taskId){
@@ -2697,14 +2697,18 @@ async function loadAppointments(){
           doneBtn.style.cssText='background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;font-size:11px';
           doneBtn.textContent='✓ בוצע';
           doneBtn.onclick=(function(lead,rowEl){return function(){
-            showApptConfirmModal(lead,function(){
-              db.from('leads').update({appointment_confirmed:true,appointment_done:true}).eq('id',lead.id).then(function(){
+            showApptConfirmModal(lead,function(amount){
+              var upd={appointment_confirmed:true,appointment_done:true};
+              if(amount&&parseFloat(amount)>0)upd.deduction_amount=parseFloat(amount);
+              db.from('leads').update(upd).eq('id',lead.id).then(function(){
                 rowEl.style.background='#f1f8e9';rowEl.style.border='1px solid #a5d6a7';
                 doneBtn.disabled=true;cancelBtn.disabled=true;postponeBtn.disabled=true;
-                doneBtn.textContent='✓ אושר';
+                doneBtn.textContent='✓ אושר'+(amount?' (₪'+parseFloat(amount).toLocaleString('he-IL')+')':'');
                 setTimeout(function(){rowEl.remove();},2000);
+                if(typeof loadAppointmentsLog==='function')loadAppointmentsLog();
+                if(typeof loadIncome==='function')loadIncome();
               });
-            });
+            },0); // snoozeCount=0 from pending list
           };})(l,row);
           var cancelBtn=document.createElement('button');cancelBtn.className='btn btn-sm';
           cancelBtn.style.cssText='background:#ffebee;color:#c62828;border:1px solid #ef9a9a;font-size:11px';
@@ -3582,9 +3586,14 @@ async function loadIncome(){
   function pad(n){return n<10?'0'+n:n;}
   var todayStr=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
   var thisMonthStart=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-01';
+  var thisMonthEnd=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(new Date(now.getFullYear(),now.getMonth()+1,0).getDate());
   function mStart(b){var d=new Date(now.getFullYear(),now.getMonth()-b,1);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01';}
 
   // מקור יחיד: leads.appointment_done=true
+  // וודא שהמשתנים מוגדרים
+  if(!thisMonthEnd){
+    thisMonthEnd=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(new Date(now.getFullYear(),now.getMonth()+1,0).getDate());
+  }
   var[rd,rL,rL1,rL2,rL3]=await Promise.all([
     db.from('doctors').select('name,specialty').order('name'),
     // חודש נוכחי — כולל ממתינים ועתידיים
@@ -5513,6 +5522,7 @@ function printTodayAppts(){
 // LOG מפגשים — תורים שבוצעו
 // ============================================================
 var allAppointmentsLog=[];
+var _snoozeCount={};
 
 // מצב פילטר LOG
 var _logPeriod='today';
@@ -5848,7 +5858,7 @@ async function editAppointmentLog(apptId){
   overlay.appendChild(modal);document.body.appendChild(overlay);
 }
 
-async function showApptConfirmModal(appt, callback){
+async function showApptConfirmModal(appt, callback, snoozeCount){
   var old=document.getElementById('proc-pick-wrap');if(old)old.remove();
   var procsResp=await db.from('procedures').select('*').order('category').order('name');
   var procsData=procsResp.data||[];
@@ -5976,7 +5986,9 @@ async function showApptConfirmModal(appt, callback){
   confirmBtn.textContent='✅ אשר וסגור';
   var snoozeBtn=document.createElement('button');
   snoozeBtn.style.cssText='flex:1;padding:10px;font-size:13px;background:#fff3e0;color:#e65100;border:2px solid #ff9800;border-radius:8px;cursor:pointer;font-weight:600';
-  snoozeBtn.textContent='⏰ 30 דק';
+  var sc=snoozeCount||0;
+  snoozeBtn.textContent=sc===0?'⏰ הזכר לי בעוד 30 דק':sc===1?'⏰ עוד 30 דק (אחרון)':'⏰ עבור לממתינים';
+  if(sc>=2){snoozeBtn.style.background='#fce4ec';snoozeBtn.style.borderColor='#e53935';snoozeBtn.style.color='#b71c1c';}
   var cancelBtn=document.createElement('button');cancelBtn.className='btn';
   cancelBtn.style.cssText='flex:1;padding:10px;font-size:13px;background:#f5f5f5;color:#757575;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer';
   cancelBtn.textContent='סגור';
@@ -5993,12 +6005,14 @@ async function showApptConfirmModal(appt, callback){
         payload.patient_name=patName;payload.patient_phone=patPhone||'';payload.doctor=appt.doctor||'';
         payload.date=apptDate;payload.time=apptTime||'00:00';payload.lead_id=appt.id;
         await db.from('appointments').insert(payload);
-        await db.from('leads').update({appointment_done:true,appointment_confirmed:true}).eq('id',appt.id);
+        await db.from('leads').update({appointment_done:true,appointment_confirmed:true,deduction_amount:price}).eq('id',appt.id);
       } else {
         await db.from('appointments').update(payload).eq('id',appt.id);
-        if(appt.lead_id)await db.from('leads').update({appointment_done:true,appointment_confirmed:true}).eq('id',appt.lead_id);
+        if(appt.lead_id)await db.from('leads').update({appointment_done:true,appointment_confirmed:true,deduction_amount:price}).eq('id',appt.lead_id);
       }
       showToast('✅ תור אושר בהצלחה');
+      if(typeof loadAppointmentsLog==='function')loadAppointmentsLog();
+      if(typeof loadIncome==='function')loadIncome();
     } else {
       if(isLead){
         await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:notes||'בוטל דרך חלונית אישור'}).eq('id',appt.id);
@@ -6011,10 +6025,24 @@ async function showApptConfirmModal(appt, callback){
     overlay.remove();
     if(callback)callback();
   };
+  // snooze counter
+  var snoozeKey=appt.id||appt.full_name||'unknown';
+  if(!_snoozeCount[snoozeKey])_snoozeCount[snoozeKey]=0;
+  
   snoozeBtn.onclick=function(){
+    _snoozeCount[snoozeKey]=(_snoozeCount[snoozeKey]||0)+1;
     overlay.remove();
-    setTimeout(function(){showApptConfirmModal(appt,callback);},30*60*1000);
-    showToast('⏰ תזכורת נקבעה לעוד 30 דקות');
+    var count=_snoozeCount[snoozeKey];
+    if(count>=2){
+      // אחרי 2 snoozes — העבר לרשימת ממתינים לאישור ואל תציג popup שוב
+      showToast('⏰ התור הועבר לרשימת ממתינים לאישור');
+      _snoozeCount[snoozeKey]=0;
+      // סמן שיופיע ברשימת ממתינים (לא appointment_done — עדיין ממתין)
+      return;
+    }
+    var label=count===1?'30 דקות':'30 דקות נוספות (סוף - אחר כך יעבור לממתינים)';
+    showToast('⏰ תזכורת נקבעה לעוד '+label);
+    setTimeout(function(){showApptConfirmModal(appt,callback,count);},30*60*1000);
   };
   btnRow.appendChild(confirmBtn);btnRow.appendChild(snoozeBtn);btnRow.appendChild(cancelBtn);
   modal.appendChild(btnRow);
