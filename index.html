@@ -1,4 +1,4 @@
-<!-- build: 1780208507 -->
+<!-- build: 1780220462 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -4527,10 +4527,21 @@ function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,im
 
   // יבוטלו
   if(toCancel.length){
-    html+='<details style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:600;color:#e53935;padding:8px 0">❌ '+toCancel.length+' תורים יבוטלו (לחץ לפירוט)</summary>';
-    html+='<div style="max-height:150px;overflow-y:auto;margin-top:8px">';
-    toCancel.forEach(function(c){html+='<div style="padding:4px 8px;font-size:12px;border-bottom:1px solid #f0f0f0">'+c.lead.full_name+' | '+c.lead.appointment_date+' | '+(c.lead.doctor||'')+'</div>';});
-    html+='</div></details>';
+    html+='<div style="margin-bottom:12px">';
+    html+='<div style="font-weight:600;color:#e53935;padding:8px 0;margin-bottom:6px">⚠️ '+toCancel.length+' תורים שלא בוצעו — בחר פעולה לכל תור:</div>';
+    html+='<div style="max-height:280px;overflow-y:auto;border:1px solid #ffe0e0;border-radius:8px">';
+    toCancel.forEach(function(tc,idx){
+      html+='<div style="padding:8px 10px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+      html+='<span style="font-size:12px;flex:1;min-width:180px">'+tc.lead.full_name+' | '+tc.lead.appointment_date+' | '+(tc.lead.doctor||'').replace(/ד"ר /g,''). slice(0,20)+'</span>';
+      html+='<select id="cancel-action-'+idx+'" onchange="updateCancelAction('+idx+',this.value)" style="font-size:12px;padding:3px 6px;border:1px solid #ddd;border-radius:6px">';
+      html+='<option value="cancel">❌ בוטל</option>';
+      html+='<option value="postpone">📅 נדחה — תאריך חדש</option>';
+      html+='<option value="keep">⏳ השאר ממתין</option>';
+      html+='</select>';
+      html+='<input id="postpone-date-'+idx+'" type="date" style="display:none;font-size:12px;padding:3px 6px;border:1px solid #ddd;border-radius:6px" onchange="updatePostponeDate('+idx+',this.value)">';
+      html+='</div>';
+    });
+    html+='</div></div>';
   }
 
   // חסרי טלפון
@@ -4556,6 +4567,18 @@ function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,im
   window._importData={toConfirm,toCreate,toCancel,conflicts,missingPhone,resolvedConflicts:{}};
 }
 
+function updateCancelAction(idx,val){
+  var dateInput=document.getElementById('postpone-date-'+idx);
+  if(dateInput)dateInput.style.display=val==='postpone'?'inline-block':'none';
+  if(!window._importData)return;
+  if(!window._importData.cancelActions)window._importData.cancelActions={};
+  window._importData.cancelActions[idx]=val;
+}
+function updatePostponeDate(idx,date){
+  if(!window._importData)return;
+  if(!window._importData.cancelDates)window._importData.cancelDates={};
+  window._importData.cancelDates[idx]=date;
+}
 function resolveConflict(idx,choice){
   if(!window._importData)return;
   window._importData.resolvedConflicts[idx]=choice;
@@ -4611,11 +4634,22 @@ async function executeImport(){
       done++;
     }
 
-    // 3. בטל תורים שלא בקובץ
+    // 3. טפל בתורים שלא בקובץ לפי בחירת המשתמש
+    var cancelActions=d.cancelActions||{};
+    var cancelDates=d.cancelDates||{};
     for(var k=0;k<d.toCancel.length;k++){
       var lead=d.toCancel[k].lead;
-      await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:'לא מופיע בייבוא טיפולוג'}).eq('id',lead.id);
-      await db.from('appointments').update({status:'cancelled'}).eq('lead_id',lead.id).eq('status','done');
+      var action=cancelActions[k]||'cancel';
+      if(action==='cancel'){
+        await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:'לא מופיע בייבוא טיפולוג'}).eq('id',lead.id);
+        await db.from('appointments').update({status:'cancelled'}).eq('lead_id',lead.id).eq('status','done');
+      } else if(action==='postpone'){
+        var newDate=cancelDates[k]||null;
+        var upd={lead_status:'נקבע תור',cancelled:false,appointment_done:false,appointment_confirmed:false};
+        if(newDate)upd.appointment_date=newDate;
+        await db.from('leads').update(upd).eq('id',lead.id);
+      }
+      // action==='keep' — לא עושים כלום, נשאר ממתין
       done++;
     }
 
