@@ -1,4 +1,4 @@
-<!-- build: 1780695766 -->
+<!-- build: 1780695886 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2962,6 +2962,25 @@ async function loadAppointments(){
   // 6 חלוניות — לפי תפקיד משתמש
   // סדר עדיפות: רופא > מזכירה > אדמין
   // ============================================================
+
+  // --- טעינת משימות (נדרש לחלוניות) ---
+  var myTasksData=[];
+  try{
+    var tResp=await db.from('tasks').select('*').eq('status','open');
+    myTasksData=(tResp.data||[]).filter(function(t){
+      var ids=[];try{ids=t.assigned_users?JSON.parse(t.assigned_users):[t.assigned_user_id];}catch(e){}
+      return t.assigned_user_id===currentUser.id||ids.includes(currentUser.id);
+    });
+  }catch(e){myTasksData=[];}
+  var myTasks=myTasksData;
+  var urgentTasks=myTasks.filter(function(t){return t.priority==='high';});
+
+  // --- טעינת מלאי (נדרש לאדמין) ---
+  var inv=[];
+  try{
+    var invResp=await db.from('inventory').select('id,quantity,min_quantity,name');
+    inv=invResp.data||[];
+  }catch(e){inv=[];}
 
   // --- נתונים משותפים ---
   // תורים שבוצעו ואומתו החודש (appointment_done=true, תאריך חלף)
