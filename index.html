@@ -1,4 +1,4 @@
-<!-- build: 1780695886 -->
+<!-- build: 1780696412 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2983,15 +2983,17 @@ async function loadAppointments(){
   }catch(e){inv=[];}
 
   // --- נתונים משותפים ---
-  // תורים שבוצעו ואומתו החודש (appointment_done=true, תאריך חלף)
+  // תורים שבוצעו ואומתו החודש (appointment_done=true, תאריך חלף — מ-1 לחודש בלבד)
   var myDoneThisMonth = appts.filter(function(a){
     return (a.doctor||'').includes(docFirst||'')
       && a.appointment_date >= thisMonthStart
-      && a.appointment_date <= todayStr;
+      && a.appointment_date <= todayStr
+      && a.appointment_date.slice(0,7) === thisMonthStart.slice(0,7);
   });
   var allDoneThisMonth = appts.filter(function(a){
     return a.appointment_date >= thisMonthStart
-      && a.appointment_date <= todayStr;
+      && a.appointment_date <= todayStr
+      && a.appointment_date.slice(0,7) === thisMonthStart.slice(0,7);
   });
 
   // תורים עתידיים החודש
@@ -3052,7 +3054,7 @@ async function loadAppointments(){
 
     // שורה 1: לידים שלי החודש | תורים שביצעתי החודש
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
-    html += numCard('📋 לידים שלי — '+mn,
+    html += numCard('📋 פניות החודש אליי — '+mn,
       myStats.leadsThisMonth, allStats.leadsThisMonth,
       '#1565c0', '#4f46e5', isDoctorAdmin);
     html += numCard('✅ תורים שביצעתי — '+mn,
@@ -3065,7 +3067,7 @@ async function loadAppointments(){
 
     // יום מרפאה קרוב — התור הבא שלי
     var nextAppts = leadsAll.filter(function(l){
-      return l.appointment_date >= todayStr
+      return l.appointment_date > todayStr
         && (l.doctor||'').includes(docFirst||'')
         && l.lead_status === 'נקבע תור'
         && !l.cancelled;
@@ -3091,14 +3093,7 @@ async function loadAppointments(){
       '#e65100', '#bf360c', isDoctorAdmin);
     html += '</div>';
 
-    // שורה 3: משימות פתוחות | משימות דחופות
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
-    html += numCard('📌 משימות פתוחות', myTasks.length, '', '#e65100', '', false);
-    html += listCard('🚨 משימות דחופות', urgentTasks, 'אין משימות דחופות',
-      function(t){
-        return '<div style="padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px;color:#c62828">⚡ '+t.title+'</div>';
-      });
-    html += '</div>';
+    // (משימות ומלאי — בלוח הבקרה בלבד)
 
   } else if(isSecretary && !isAdmin){
     // ========== תצוגת מזכירה ==========
@@ -3112,16 +3107,12 @@ async function loadAppointments(){
         && (l.secretary||'').includes(mySecName);
     });
 
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
     html += numCard('✅ תורים שקבעתי — '+mn, mySecDone.length, '', '#2e7d32', '', false);
-    html += numCard('📌 משימות פתוחות', myTasks.length, '', '#e65100', '', false);
-    html += '</div>';
 
-    // תורים היום + משימות דחופות
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
-    html += listCard('🗓️ תורים היום — כל המרפאה', allStats.apptToday > 0 ?
+    // תורים היום
+    html += listCard('🗓️ תורים היום — כל המרפאה',
       leadsAll.filter(function(l){return l.appointment_date===todayStr&&!l.cancelled;})
-        .sort(function(a,b){return (a.appointment_time||'').localeCompare(b.appointment_time||'');}) : [],
+        .sort(function(a,b){return (a.appointment_time||'').localeCompare(b.appointment_time||'');}),
       'אין תורים היום',
       function(l){
         return '<div style="display:flex;justify-content:space-between;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px">'
@@ -3129,11 +3120,6 @@ async function loadAppointments(){
           +'<span style="color:#555;font-size:11px">'+(l.appointment_time?String(l.appointment_time).slice(0,5):'—')
           +' | '+(l.doctor||'').split('(')[0].trim()+'</span></div>';
       });
-    html += listCard('🚨 משימות דחופות', urgentTasks, 'אין משימות דחופות',
-      function(t){
-        return '<div style="padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px;color:#c62828">⚡ '+t.title+'</div>';
-      });
-    html += '</div>';
 
     // תורים עתידיים
     html += numCard('🗓️ תורים מתוכננים — '+mn, allFutureThisMonth.length, '', '#1565c0', '', false);
@@ -3159,29 +3145,11 @@ async function loadAppointments(){
           +'<span style="color:#555;font-size:11px">'+(l.appointment_time?String(l.appointment_time).slice(0,5):'—')
           +' | '+(l.doctor||'').split('(')[0].trim()+'</span></div>';
       });
-    html += numCard('📌 משימות פתוחות', myTasks.length, '', '#e65100', '', false);
-    html += '</div>';
-
-    // תורים עתידיים + משימות דחופות
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+    // תורים עתידיים
     html += numCard('🗓️ תורים מתוכננים — '+mn, allFutureThisMonth.length, '', '#1565c0', '', false);
-    html += listCard('🚨 משימות דחופות', urgentTasks, 'אין משימות דחופות',
-      function(t){
-        return '<div style="padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px;color:#c62828">⚡ '+t.title+'</div>';
-      });
-    html += '</div>';
   }
 
-  // מלאי נמוך — לכל מי שהוא admin
-  if(isAdmin){
-    var lowInv=(inv||[]).filter(function(i){return i.quantity<(i.min_quantity||0);});
-    html += listCard('📦 מלאי נמוך לטיפול', lowInv, 'המלאי תקין ✅',
-      function(i){
-        return '<div style="display:flex;justify-content:space-between;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px">'
-          +'<span style="font-weight:600;color:#c62828">'+i.name+'</span>'
-          +'<span style="color:#555">'+i.quantity+'/'+i.min_quantity+'</span></div>';
-      });
-  }
+  // (מלאי נמוך — בלוח הבקרה בלבד)
 
   html += '</div>'; // סגירת grid ראשי
 
