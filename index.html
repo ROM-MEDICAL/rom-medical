@@ -1,4 +1,4 @@
-<!-- build: 1780663906 -->
+<!-- build: 1780664610 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2768,7 +2768,7 @@ async function loadAppointments(){
         var d=l.return_date||l.original_date;
         return d&&d>=prevMonthStart&&d<=prevMonthSameDay;
       }).length,
-      apptThisWeek:withAppt.filter(function(l){return l.appointment_date>=weekStartStr&&l.appointment_date<=weekEndStr;}).length,
+      apptThisWeekRemoved:0,
       // כל התורים החודש = שבוצעו + עתידיים (ללא ביטולים)
       apptThisMonth:apptDoneThisMonth+apptFutureThisMonth,
       futureAppts:futureArr,
@@ -2784,6 +2784,13 @@ async function loadAppointments(){
   }):appts;
   var myDoneAppts=myAppts.filter(function(a){return a.appointment_done===true;});
   var myDoneCount=myDoneAppts.length;
+  // leads שלי לחישוב הכנסות (לפי doctor)
+  var myLeads=(isDoctorOnly||isDoctorAdmin)?leads.filter(function(l){
+    return docFirst&&docFirst.length>1&&(l.doctor||'').includes(docFirst);
+  }):leads;
+  var myLeadsAll=(isDoctorOnly||isDoctorAdmin)?leadsAll.filter(function(l){
+    return docFirst&&docFirst.length>1&&(l.doctor||'').includes(docFirst);
+  }):leadsAll;
 
   // טען consultation_price לפי רופא
   var{data:doctorsData}=await db.from('doctors').select('name,consultation_price');
@@ -2809,21 +2816,25 @@ async function loadAppointments(){
 
   // מזהי לידים שיש להם appointment מאושר — למניעת כפל
   var confirmedLeadIds=new Set(
-    appts.filter(function(a){return a.status==='done'&&a.lead_id;})
-         .map(function(a){return a.lead_id;})
+    appts.filter(function(a){return a.appointment_done===true&&a.id;})
+         .map(function(a){return a.id;})
   );
 
-  // --- 1. מאומת: appointments.status='done' בלבד ---
-  var myConfirmedAppts=myAppts.filter(function(a){
-    return a.appointment_done===true&&a.appointment_date&&a.appointment_date>=thisMonthStart&&a.appointment_date<=todayStr;
-  });
-  var allConfirmedAppts=appts.filter(function(a){
-    return a.appointment_done===true&&a.appointment_date&&a.appointment_date>=thisMonthStart&&a.appointment_date<=todayStr;
-  });
+  // --- 1. מאומת: tipulog_synced=true OR appointment_confirmed=true, החודש הקלנדרי ---
+  function isConfirmedAppt(l){
+    return (l.tipulog_synced===true||l.appointment_confirmed===true||l.appointment_done===true)
+      &&l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<=todayStr
+      &&!l.cancelled&&l.lead_status!=='בוטל';
+  }
+  var myConfirmedAppts=(isDoctorOnly||isDoctorAdmin)?leads.filter(function(l){
+    return isConfirmedAppt(l)&&docFirst&&(l.doctor||'').includes(docFirst);
+  }):leads.filter(isConfirmedAppt);
+  var allConfirmedAppts=leadsAll.filter(isConfirmedAppt);
   var myConfirmedRevenue=0;
   myConfirmedAppts.forEach(function(a){myConfirmedRevenue+=Number(a.deduction_amount||0);});
   var allConfirmedRevenue=0;
   allConfirmedAppts.forEach(function(a){allConfirmedRevenue+=Number(a.deduction_amount||0);});
+  // תיקון: myAppts ← myConfirmedAppts לתאימות
 
   // --- 2. ממתינים לאימות: תאריך עבר + לא אומת בשום צורה ---
   // תנאי: lead_status='נקבע תור' + לא בוטל + appointment_done=false + appointment_confirmed=false
@@ -2835,20 +2846,24 @@ async function loadAppointments(){
     if(confirmedLeadIds.has(l.id))return false;
     return true;
   }
-  var myPastUnconfirmed=leads.filter(function(l){
-    return l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr&&isUnconfirmed(l);
-  });
-  var allPastUnconfirmed=leadsAll.filter(function(l){
-    return l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr&&isUnconfirmed(l);
-  });
+  // ממתינים — מתחילת החודש הקלנדרי עד היום
+  function isUnconfirmedMonth(l){
+    return isUnconfirmed(l)&&l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr;
+  }
+  var myPastUnconfirmed=((isDoctorOnly||isDoctorAdmin)?leads.filter(function(l){
+    return isUnconfirmedMonth(l)&&docFirst&&(l.doctor||'').includes(docFirst);
+  }):leads.filter(isUnconfirmedMonth));
+  var allPastUnconfirmed=leadsAll.filter(isUnconfirmedMonth);
 
-  // --- 3. עתידיים: תאריך מחר עד סוף החודש, לא אומת ---
-  var myFutureLeads=leads.filter(function(l){
-    return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd&&isUnconfirmed(l);
-  });
-  var allFutureLeads=leadsAll.filter(function(l){
-    return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd&&isUnconfirmed(l);
-  });
+  // --- 3. עתידיים: רק החודש הקלנדרי (מחר עד סוף החודש) ---
+  function isFutureThisMonth(l){
+    return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd
+      &&l.lead_status==='נקבע תור'&&!l.cancelled&&!l.appointment_done;
+  }
+  var myFutureLeads=((isDoctorOnly||isDoctorAdmin)?leads.filter(function(l){
+    return isFutureThisMonth(l)&&docFirst&&(l.doctor||'').includes(docFirst);
+  }):leads.filter(isFutureThisMonth));
+  var allFutureLeads=leadsAll.filter(isFutureThisMonth);
 
   // --- חישובים ---
   var myDoneCount=myConfirmedAppts.length;
@@ -2950,8 +2965,7 @@ async function loadAppointments(){
   // Appointments planned - 3 split cards
   html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">';
   html+=splitCard('🗓️ תורים מתוכננים - היום',myStats.apptToday,'תורים',allStats.apptToday,'תורים','#fff3e0','#e65100','#ffe0b2','#bf360c');
-  html+=splitCard('📅 תורים מתוכננים - שבוע',myStats.apptThisWeek,'תורים',allStats.apptThisWeek,'תורים','#e3f2fd','#1565c0','#bbdefb','#0d47a1');
-  html+=splitCard('📆 תורים מתוכננים - חודש',myStats.apptThisMonth,'תורים',allStats.apptThisMonth,'תורים','#e8f5e9','#2e7d32','#c8e6c9','#1b5e20');
+  html+=splitCard('📆 תורים מתוכננים - החודש',myStats.apptThisMonth,'תורים',allStats.apptThisMonth,'תורים','#e8f5e9','#2e7d32','#c8e6c9','#1b5e20');
   html+='</div>';
 
   // Revenue (not for secretary)
