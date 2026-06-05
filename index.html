@@ -1,4 +1,4 @@
-<!-- build: 1780664610 -->
+<!-- build: 1780665016 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2842,8 +2842,7 @@ async function loadAppointments(){
   function isUnconfirmed(l){
     if(!l.appointment_date||l.lead_status!=='נקבע תור')return false;
     if(l.cancelled||l.lead_status==='בוטל')return false;
-    if(l.appointment_done||l.appointment_confirmed)return false;
-    if(confirmedLeadIds.has(l.id))return false;
+    if(l.appointment_done||l.appointment_confirmed||l.tipulog_synced)return false;
     return true;
   }
   // ממתינים — מתחילת החודש הקלנדרי עד היום
@@ -3127,8 +3126,27 @@ async function loadAppointments(){
   }
 
   // Appointments table - grouped by doctor
-  var pendingAppts=myAppts.filter(function(a){return a.status==='pending';});
-  var doneAppts=myAppts.filter(function(a){return a.appointment_done===true;});
+  // המר leads לפורמט תואם appointments
+  function leadToAppt(l){
+    return {
+      id:l.id,
+      patient_name:l.full_name,
+      patient_phone:l.phone||'',
+      doctor:l.doctor||'',
+      date:l.appointment_date||'',
+      time:l.appointment_time||'',
+      deduction_amount:l.deduction_amount||0,
+      status:l.appointment_done?'done':(l.appointment_confirmed?'done':'pending'),
+      lead_id:l.id,
+      appointment_done:l.appointment_done,
+      appointment_confirmed:l.appointment_confirmed,
+      tipulog_synced:l.tipulog_synced,
+      lead_status:l.lead_status,
+    };
+  }
+  var myApptsConverted=myAppts.map(leadToAppt);
+  var pendingAppts=myApptsConverted.filter(function(a){return !a.appointment_done&&!a.appointment_confirmed&&a.lead_status==='נקבע תור';});
+  var doneAppts=myApptsConverted.filter(function(a){return a.appointment_done===true;});
   var byDoctor={};
   pendingAppts.forEach(function(a){var doc=a.doctor||'ללא רופא';if(!byDoctor[doc])byDoctor[doc]=[];byDoctor[doc].push(a);});
   Object.keys(byDoctor).forEach(function(doc){byDoctor[doc].sort(function(a,b){return(a.date+a.time)<(b.date+b.time)?-1:1;});});
