@@ -1,4 +1,4 @@
-<!-- build: 1780220462 -->
+<!-- build: 1780663906 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2361,7 +2361,7 @@ async function addTaskComment(taskId,text,callback){
   try{comments=Array.isArray(task.comments)?task.comments:(task.comments?JSON.parse(task.comments):[]);}catch(e){}
   comments.push({author:myName,text:text,time:new Date().toISOString()});
   await db.from('tasks').update({comments:comments}).eq('id',taskId);
-  if(callback)callback(price);
+  if(callback)callback();
 }
 async function completeTask(id){await db.from('tasks').update({status:'done'}).eq('id',id);showToast('הושלם ✓');loadTasks();loadDashboard();}
 async function openTaskModal(taskId){
@@ -2631,7 +2631,7 @@ async function loadAppointments(){
   var weekEndStr=new Date(now.getFullYear(),now.getMonth(),now.getDate()+(7-now.getDay())).toISOString().slice(0,10);
 
   var[r1,r2,r3]=await Promise.all([
-    db.from('appointments').select('*').gte('date',thisMonthStart).order('date',{ascending:false}),
+    db.from('leads').select('id,full_name,phone,doctor,appointment_date,appointment_time,deduction_amount,appointment_done,appointment_confirmed,tipulog_synced,lead_status,cancelled,source').eq('appointment_done',true).gte('appointment_date',thisMonthStart).eq('cancelled',false).order('appointment_date',{ascending:false}),
     db.from('leads').select('*').order('original_date',{ascending:false}).range(0,29999),
     db.from('procedures').select('*')
   ]);
@@ -2643,19 +2643,16 @@ async function loadAppointments(){
   var MAY_START=thisMonthStart;
   var nowTime=now.getHours()*60+now.getMinutes();
   var pendingConfirm=allLeadsData.filter(function(l){
-    if(!l.appointment_date)return false;
+    if(!l.appointment_date||!l.appointment_time)return false;
     if(l.appointment_date<MAY_START)return false;
     if(l.cancelled||l.lead_status==='בוטל')return false;
-    if(l.appointment_done||l.appointment_confirmed)return false;
-    // תור שתאריכו לפני היום — ממתין בהחלט
+    if(l.appointment_confirmed)return false;
+    // תור שעבר — תאריך לפני היום, או היום אחרי שעת התור+30 דקות
     if(l.appointment_date<todayStr)return true;
-    // תור של היום — ממתין רק אם שעתו עברה (או אין שעה)
     if(l.appointment_date===todayStr){
-      if(!l.appointment_time)return true;
       var parts=String(l.appointment_time).slice(0,5).split(':');
       var apptMins=parseInt(parts[0])*60+parseInt(parts[1]||0);
-      // ממתין אם השעה + 15 דקות עברה (הורדנו ל-15 במקום 30)
-      return nowTime>=apptMins+15;
+      return nowTime>=apptMins+30;
     }
     return false;
   });
@@ -2697,18 +2694,14 @@ async function loadAppointments(){
           doneBtn.style.cssText='background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;font-size:11px';
           doneBtn.textContent='✓ בוצע';
           doneBtn.onclick=(function(lead,rowEl){return function(){
-            showApptConfirmModal(lead,function(amount){
-              var upd={appointment_confirmed:true,appointment_done:true};
-              if(amount&&parseFloat(amount)>0)upd.deduction_amount=parseFloat(amount);
-              db.from('leads').update(upd).eq('id',lead.id).then(function(){
+            showApptConfirmModal(lead,function(){
+              db.from('leads').update({appointment_confirmed:true,appointment_done:true}).eq('id',lead.id).then(function(){
                 rowEl.style.background='#f1f8e9';rowEl.style.border='1px solid #a5d6a7';
                 doneBtn.disabled=true;cancelBtn.disabled=true;postponeBtn.disabled=true;
-                doneBtn.textContent='✓ אושר'+(amount?' (₪'+parseFloat(amount).toLocaleString('he-IL')+')':'');
+                doneBtn.textContent='✓ אושר';
                 setTimeout(function(){rowEl.remove();},2000);
-                if(typeof loadAppointmentsLog==='function')loadAppointmentsLog();
-                if(typeof loadIncome==='function')loadIncome();
               });
-            },0); // snoozeCount=0 from pending list
+            });
           };})(l,row);
           var cancelBtn=document.createElement('button');cancelBtn.className='btn btn-sm';
           cancelBtn.style.cssText='background:#ffebee;color:#c62828;border:1px solid #ef9a9a;font-size:11px';
@@ -2785,11 +2778,11 @@ async function loadAppointments(){
 
   var myStats=calcStats(leads);
   var allStats=calcStats(leadsAll);
-  var doneCount=appts.filter(function(a){return a.status==='done';}).length;
+  var doneCount=appts.filter(function(a){return a.appointment_done===true;}).length;
   var myAppts=(isDoctorOnly||isDoctorAdmin)?appts.filter(function(a){
     return docFirst&&docFirst.length>1&&(a.doctor||'').includes(docFirst);
   }):appts;
-  var myDoneAppts=myAppts.filter(function(a){return a.status==='done';});
+  var myDoneAppts=myAppts.filter(function(a){return a.appointment_done===true;});
   var myDoneCount=myDoneAppts.length;
 
   // טען consultation_price לפי רופא
@@ -2809,52 +2802,45 @@ async function loadAppointments(){
   }
 
   // ===== חישוב הכנסות =====
-  // ════════════════════════════════════════════════════
-  // חישוב הכנסות — כללים ברזל:
-  // מאומת  = leads.appointment_done=true, החודש הנוכחי, לא בוטל
-  // ממתין  = lead_status='נקבע תור', תאריך עבר, לא אומת, לא בוטל
-  // עתידי  = lead_status='נקבע תור', תאריך עתידי עד סוף החודש, לא בוטל
-  // מוערך  = מאומת + ממתינים×800
-  // צפי    = מוערך + עתידיים×800
-  // ════════════════════════════════════════════════════
+  // הגדרות סופיות:
+  // מאומת  = appointments.status='done' מתחילת החודש עד היום (כולל)
+  // מוערך  = מאומת + לידים שתאריכם עבר ולא אומתו × 800₪  (עד היום)
+  // צפי    = מוערך + לידים עתידיים עד סוף החודש × 800₪
 
-  // 1. מאומת
-  function isConfirmed(l){
-    return l.appointment_done===true && !l.cancelled;
-  }
+  // מזהי לידים שיש להם appointment מאושר — למניעת כפל
+  var confirmedLeadIds=new Set(
+    appts.filter(function(a){return a.status==='done'&&a.lead_id;})
+         .map(function(a){return a.lead_id;})
+  );
 
-  var myConfirmedAppts=leads.filter(function(l){
-    return isConfirmed(l)&&l.appointment_date>=thisMonthStart&&l.appointment_date<=todayStr;
+  // --- 1. מאומת: appointments.status='done' בלבד ---
+  var myConfirmedAppts=myAppts.filter(function(a){
+    return a.appointment_done===true&&a.appointment_date&&a.appointment_date>=thisMonthStart&&a.appointment_date<=todayStr;
   });
-  var allConfirmedAppts=leadsAll.filter(function(l){
-    return isConfirmed(l)&&l.appointment_date>=thisMonthStart&&l.appointment_date<=todayStr;
+  var allConfirmedAppts=appts.filter(function(a){
+    return a.appointment_done===true&&a.appointment_date&&a.appointment_date>=thisMonthStart&&a.appointment_date<=todayStr;
   });
-  var myConfirmedRevenue=0; myConfirmedAppts.forEach(function(l){myConfirmedRevenue+=Number(l.deduction_amount||0);});
-  var allConfirmedRevenue=0; allConfirmedAppts.forEach(function(l){allConfirmedRevenue+=Number(l.deduction_amount||0);});
-  var myConfirmedCount=myConfirmedAppts.length;
-  var allConfirmedCount=allConfirmedAppts.length;
+  var myConfirmedRevenue=0;
+  myConfirmedAppts.forEach(function(a){myConfirmedRevenue+=Number(a.deduction_amount||0);});
+  var allConfirmedRevenue=0;
+  allConfirmedAppts.forEach(function(a){allConfirmedRevenue+=Number(a.deduction_amount||0);});
 
-  // 2. ממתינים — תאריך עבר, נקבע תור, לא אומת, לא בוטל
+  // --- 2. ממתינים לאימות: תאריך עבר + לא אומת בשום צורה ---
+  // תנאי: lead_status='נקבע תור' + לא בוטל + appointment_done=false + appointment_confirmed=false
+  // + אין appointment בטבלה (confirmedLeadIds)
   function isUnconfirmed(l){
-    if(!l.appointment_date||!l.lead_status)return false;
-    if(l.lead_status!=='נקבע תור')return false;
-    if(l.cancelled===true)return false;
-    if(l.appointment_done===true||l.appointment_confirmed===true)return false;
+    if(!l.appointment_date||l.lead_status!=='נקבע תור')return false;
+    if(l.cancelled||l.lead_status==='בוטל')return false;
+    if(l.appointment_done||l.appointment_confirmed)return false;
+    if(confirmedLeadIds.has(l.id))return false;
     return true;
   }
-  // ממתינים: תאריך שעבר + תאריך היום אחרי +15 דקות
-  function isPastUnconfirmed(l){
-    if(!isUnconfirmed(l))return false;
-    if(l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr)return true;
-    if(l.appointment_date===todayStr){
-      if(!l.appointment_time)return true;
-      var pts=String(l.appointment_time).slice(0,5).split(':');
-      return nowTime>=parseInt(pts[0])*60+parseInt(pts[1]||0)+15;
-    }
-    return false;
-  }
-  var myPastUnconfirmed=leads.filter(isPastUnconfirmed);
-  var allPastUnconfirmed=leadsAll.filter(isPastUnconfirmed);
+  var myPastUnconfirmed=leads.filter(function(l){
+    return l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr&&isUnconfirmed(l);
+  });
+  var allPastUnconfirmed=leadsAll.filter(function(l){
+    return l.appointment_date>=thisMonthStart&&l.appointment_date<todayStr&&isUnconfirmed(l);
+  });
 
   // --- 3. עתידיים: תאריך מחר עד סוף החודש, לא אומת ---
   var myFutureLeads=leads.filter(function(l){
@@ -2864,26 +2850,37 @@ async function loadAppointments(){
     return l.appointment_date&&l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd&&isUnconfirmed(l);
   });
 
-  // --- חישובים סופיים ---
-  var myDoneCount=myConfirmedCount;
+  // --- חישובים ---
+  var myDoneCount=myConfirmedAppts.length;
   var myPendingCount=myPastUnconfirmed.length;
-  var allPendingCount=allPastUnconfirmed.length;
-  // מוערך = מאומת + ממתינים×800
+  // מוערך = מאומת + ממתינים×800 (עד היום)
   var myEstimatedRevenue=Math.round(myConfirmedRevenue+myPendingCount*800);
-  var allEstimatedRevenue=Math.round(allConfirmedRevenue+allPendingCount*800);
-  // צפי = מוערך + עתידיים×800
+  var allEstimatedRevenue=Math.round(allConfirmedRevenue+allPastUnconfirmed.length*800);
+  // צפי = מוערך + עתידיים×800 (עד סוף החודש)
   var myForecastRevenue=Math.round(myEstimatedRevenue+myFutureLeads.length*800);
   var allForecastRevenue=Math.round(allEstimatedRevenue+allFutureLeads.length*800);
-  // אחוז אימות = מאומתים ÷ (מאומתים + ממתינים)
+  // אחוז אימות: מתוך כל שעבר, כמה אומת
   var myPastTotal=myDoneCount+myPendingCount;
   var accuracyPct=myPastTotal>0?Math.round(myDoneCount/myPastTotal*100):100;
-  var allPastTotal=allConfirmedCount+allPendingCount;
-  var allAccuracyPct=allPastTotal>0?Math.round(allConfirmedCount/allPastTotal*100):100;
+  var allPastTotal=allConfirmedAppts.length+allPastUnconfirmed.length;
+  var allAccuracyPct=allPastTotal>0?Math.round(allConfirmedAppts.length/allPastTotal*100):100;
+  // שמור משתנים ישנים לתאימות
   var confirmedRevenue=myConfirmedRevenue;
   var allRevenue2=allConfirmedRevenue;
   var myTotalApptCount=myDoneCount+myPendingCount+myFutureLeads.length;
 
-
+  // DEBUG — הסר לאחר אימות
+  console.log('[REVENUE]',{
+    confirmed_appts: allConfirmedAppts.length,
+    confirmed_total: allConfirmedRevenue,
+    pending_count: allPastUnconfirmed.length,
+    future_count: allFutureLeads.length,
+    estimated: allEstimatedRevenue,
+    forecast: allForecastRevenue,
+    sample_pending: allPastUnconfirmed.slice(0,3).map(function(l){
+      return {name:l.full_name,date:l.appointment_date,done:l.appointment_done,confirmed:l.appointment_confirmed};
+    })
+  });
 
   // ביצועי מזכירות — לפי return_date (תאריך טיפול בליד)
   var secStats={};
@@ -3117,7 +3114,7 @@ async function loadAppointments(){
 
   // Appointments table - grouped by doctor
   var pendingAppts=myAppts.filter(function(a){return a.status==='pending';});
-  var doneAppts=myAppts.filter(function(a){return a.status==='done';});
+  var doneAppts=myAppts.filter(function(a){return a.appointment_done===true;});
   var byDoctor={};
   pendingAppts.forEach(function(a){var doc=a.doctor||'ללא רופא';if(!byDoctor[doc])byDoctor[doc]=[];byDoctor[doc].push(a);});
   Object.keys(byDoctor).forEach(function(doc){byDoctor[doc].sort(function(a,b){return(a.date+a.time)<(b.date+b.time)?-1:1;});});
@@ -3262,21 +3259,8 @@ async function finalConfirm(){
   const total=selProcs.reduce((s,p)=>s+p.price,0);
   const upd={status:'done',review_sent:selRev_==='yes'};
   if(selDeduct==='yes'&&total>0){upd.deduction_amount=total;upd.deduction_items=JSON.stringify(selProcs);}
-  
-  // 1. עדכן appointments
-  const{data:apptData}=await db.from('appointments').update(upd).eq('id',confirmApptId).select('lead_id,deduction_amount');
-  
-  // 2. עדכן leads — appointment_done=true + deduction_amount
-  if(apptData&&apptData[0]&&apptData[0].lead_id){
-    var leadUpd={appointment_done:true,appointment_confirmed:true};
-    var amt=upd.deduction_amount||apptData[0].deduction_amount;
-    if(amt&&amt>0)leadUpd.deduction_amount=amt;
-    await db.from('leads').update(leadUpd).eq('id',apptData[0].lead_id);
-  }
-  
-  closeModal('confirm-appt-modal');
-  showToast('התור אושר ✓');
-  loadAppointments();loadDashboard();
+  await db.from('appointments').update(upd).eq('id',confirmApptId);
+  closeModal('confirm-appt-modal');showToast('התור אושר ✓');loadAppointments();loadDashboard();
 }
 
 /* REVIEWS */
@@ -3586,53 +3570,40 @@ async function loadIncome(){
   function pad(n){return n<10?'0'+n:n;}
   var todayStr=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
   var thisMonthStart=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-01';
-  var thisMonthEnd=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(new Date(now.getFullYear(),now.getMonth()+1,0).getDate());
   function mStart(b){var d=new Date(now.getFullYear(),now.getMonth()-b,1);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01';}
 
-  // מקור יחיד: leads.appointment_done=true
-  // וודא שהמשתנים מוגדרים
-  if(!thisMonthEnd){
-    thisMonthEnd=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(new Date(now.getFullYear(),now.getMonth()+1,0).getDate());
-  }
-  var[rd,rL,rL1,rL2,rL3]=await Promise.all([
+  // מקור יחיד לחישוב הכנסות: leads.deduction_amount (הטיפולוג)
+  // appointments משמשת רק לרשימת הממתינים לאישור
+  var[rd,rL,rL1,rL2,rL3,rLpend]=await Promise.all([
     db.from('doctors').select('name,specialty').order('name'),
-    // חודש נוכחי — כולל ממתינים ועתידיים
+    // חודש נוכחי — תורים עם סכום
     db.from('leads').select('id,doctor,deduction_amount,appointment_date,appointment_done,cancelled,lead_status,appointment_confirmed')
-      .gte('appointment_date',thisMonthStart)
-      .lte('appointment_date',thisMonthEnd),
-    // חודשים קודמים לממוצע
-    db.from('leads').select('doctor,deduction_amount')
-      .eq('appointment_done',true).eq('cancelled',false)
+      .gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr),
+    // חודש -1
+    db.from('leads').select('doctor,deduction_amount,appointment_done')
+      .eq('appointment_done',true).neq('deduction_amount',null)
       .gte('appointment_date',mStart(1)).lt('appointment_date',mStart(0)),
-    db.from('leads').select('doctor,deduction_amount')
-      .eq('appointment_done',true).eq('cancelled',false)
+    // חודש -2
+    db.from('leads').select('doctor,deduction_amount,appointment_done')
+      .eq('appointment_done',true).neq('deduction_amount',null)
       .gte('appointment_date',mStart(2)).lt('appointment_date',mStart(1)),
-    db.from('leads').select('doctor,deduction_amount')
-      .eq('appointment_done',true).eq('cancelled',false)
-      .gte('appointment_date',mStart(3)).lt('appointment_date',mStart(2))
+    // חודש -3
+    db.from('leads').select('doctor,deduction_amount,appointment_done')
+      .eq('appointment_done',true).neq('deduction_amount',null)
+      .gte('appointment_date',mStart(3)).lt('appointment_date',mStart(2)),
+    // ממתינים לאימות (תאריך עבר, לא בוטל, לא אומת)
+    db.from('leads').select('id,doctor,lead_status,cancelled,appointment_done,appointment_confirmed,appointment_date')
+      .gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr)
   ]);
 
-  var monthLeads=rL.data||[];
+  // apptLeadIds לא רלוונטי יותר — מקור יחיד
+  var apptLeadIds=new Set();
 
-  // מאומת = appointment_done=true, לא בוטל, עם סכום, עד היום
-  var confirmedCur=monthLeads.filter(function(l){
-    return l.appointment_done===true&&!l.cancelled&&l.appointment_date<=todayStr;
-  }).map(function(l){return {doctor:l.doctor,deduction_amount:l.deduction_amount,procedure_name:null};});
-
-  // ממתינים = נקבע תור, תאריך עבר, לא אומת, לא בוטל
-  var pendingCur=monthLeads.filter(function(l){
-    return l.lead_status==='נקבע תור'
-      &&!l.cancelled
-      &&l.appointment_done!==true
-      &&l.appointment_confirmed!==true
-      &&l.appointment_date<todayStr;
-  });
-
-  // עתידיים = נקבע תור, תאריך מחר עד סוף החודש, לא בוטל
-  var futureCur=monthLeads.filter(function(l){
-    return l.lead_status==='נקבע תור'
-      &&!l.cancelled
-      &&l.appointment_date>todayStr;
+  // מאומת = leads עם appointment_done=true + deduction_amount
+  var confirmedCur=(rL.data||[]).filter(function(l){
+    return l.appointment_done&&l.deduction_amount>0&&!l.cancelled;
+  }).map(function(l){
+    return {doctor:l.doctor,deduction_amount:l.deduction_amount,procedure_name:null};
   });
 
   var r0merged={data:confirmedCur};
@@ -3701,16 +3672,15 @@ async function loadIncome(){
     return m;
   }
 
-  // ממתינים ועתידיים — מ-monthLeads שכבר נטענו
+  // ממתינים: תאריך עבר, לא בוטל, לא אומת
   var pendByDoc={};
-  pendingCur.forEach(function(l){
+  (rLpend.data||[]).forEach(function(l){
+    if(!l.appointment_date||l.appointment_date>=todayStr)return;
+    if(l.cancelled||l.lead_status==='בוטל')return;
+    if(l.lead_status!=='נקבע תור')return;
+    if(l.appointment_done||l.appointment_confirmed)return;
     var d=matchDoctor(l.doctor);
     pendByDoc[d]=(pendByDoc[d]||0)+1;
-  });
-  var futureByDoc={};
-  futureCur.forEach(function(l){
-    var d=matchDoctor(l.doctor);
-    futureByDoc[d]=(futureByDoc[d]||0)+1;
   });
 
   var cur=agg(r0merged.data),p1=agg(r1merged.data),p2=agg(r2merged.data),p3=agg(r3merged.data);
@@ -3727,19 +3697,15 @@ async function loadIncome(){
   // צפי   = מוערך + עתידיים×800 (לא מחושב כאן — רק במודול משימות)
   var totC=0,totA=0,totOH=0;
   docs.forEach(function(d){totC+=(cur[d]?cur[d].rev:0);totA+=(cur[d]?cur[d].cnt:0);totOH+=(cur[d]?cur[d].oh:0);});
-  var totPendCount=pendingCur.length;
-  var totFutureCount=futureCur.length;
+  var totPendCount=Object.values(pendByDoc).reduce(function(s,v){return s+v;},0);
   var totPendRev=totPendCount*800;
-  var totFutureRev=totFutureCount*800;
-  var totE=totC+totPendRev;       // מוערך = מאומת + ממתינים
-  var totF=totE+totFutureRev;     // צפי = מוערך + עתידיים
+  var totE=totC+totPendRev; // מוערך = מאומת + ממתינים
   var totN=totC-totOH;
-  var totAccPct=(totA+totPendCount)>0?Math.round(totA/(totA+totPendCount)*100):100;
   var mn=now.toLocaleDateString('he-IL',{month:'long',year:'numeric'});
   var h='<div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">';
-  h+='<div class="stat-card stat-green"><div class="stat-label">✅ מאומת ('+mn+')</div><div class="stat-val">₪'+totC.toLocaleString('he-IL')+'</div><div style="font-size:11px;color:#2e7d32;margin-top:4px">'+totA+' תורים | אימות: '+totAccPct+'%</div></div>';
-  h+='<div class="stat-card" style="border-right:3px solid #e65100;background:#fff3e0"><div class="stat-label">⏳ מוערך (עד היום) — '+totPendCount+' ×800₪</div><div class="stat-val" style="color:#e65100">₪'+totE.toLocaleString('he-IL')+'</div></div>';
-  h+='<div class="stat-card" style="border-right:3px solid #6366f1;background:#f5f3ff"><div class="stat-label">📅 צפי סוף חודש — '+totFutureCount+' עתידיים ×800₪</div><div class="stat-val" style="color:#4f46e5">₪'+totF.toLocaleString('he-IL')+'</div></div>';
+  h+='<div class="stat-card stat-green"><div class="stat-label">✅ מאומת ('+mn+')</div><div class="stat-val">₪'+totC.toLocaleString('he-IL')+'</div></div>';
+  h+='<div class="stat-card" style="border-right:3px solid #e65100;background:#fff3e0"><div class="stat-label">⏳ מוערך (מאומת + '+totPendCount+' ×800₪)</div><div class="stat-val" style="color:#e65100">₪'+totE.toLocaleString('he-IL')+'</div></div>';
+  h+='<div class="stat-card stat-orange"><div class="stat-label">קיזוז ('+ohLabel()+')</div><div class="stat-val">₪'+totOH.toLocaleString('he-IL')+'</div></div>';
   h+='<div class="stat-card stat-blue"><div class="stat-label">נטו לחלוקה (מאומת)</div><div class="stat-val">₪'+totN.toLocaleString('he-IL')+'</div></div>';
   h+='</div>';
   h+='<div class="card" style="padding:0"><div class="tbl-wrap"><table>';
@@ -4427,7 +4393,7 @@ async function handleTipulogUpload(input){
           return normName(l.full_name)===impNorm && l.appointment_date===imp.date && !l.cancelled;
         });
         if(exact)return exact;
-        // 2. match חלקי: לפחות 2 מילים משותפות + אותו תאריך
+        // 2. match חלקי: לפחות 2 מילים + אותו תאריך
         var partial=leads.find(function(l){
           if(l.appointment_date!==imp.date||l.cancelled)return false;
           var lNorm=normName(l.full_name);
@@ -4436,14 +4402,33 @@ async function handleTipulogUpload(input){
           return shared>=2;
         });
         if(partial)return partial;
-        // 3. match שם פרטי + שם משפחה בנפרד + אותו תאריך
+        // 3. match שם + תאריך (קרוב ±3 ימים)
         var firstNorm=normName(imp.first_name);
         var lastNorm=normName(imp.last_name);
-        return leads.find(function(l){
+        var byName=leads.find(function(l){
           if(l.appointment_date!==imp.date||l.cancelled)return false;
           var lNorm=normName(l.full_name);
           return lNorm.includes(firstNorm)&&lNorm.includes(lastNorm);
-        })||null;
+        });
+        if(byName)return byName;
+        // 4. ★ חדש: ליד סגור עם אותו טלפון (ללא תאריך תור)
+        if(imp.phone){
+          var normPh=imp.phone.replace(/[^0-9]/g,'').slice(-10);
+          var byPhone=leads.find(function(l){
+            if(l.cancelled)return false;
+            if(l.lead_status!=='הליד נסגר')return false;
+            var lPh=(l.phone||'').replace(/[^0-9]/g,'').slice(-10);
+            return lPh===normPh;
+          });
+          if(byPhone)return byPhone;
+        }
+        // 5. ★ חדש: שם זהה בלי קשר לתאריך (ליד סגור)
+        var byNameClosed=leads.find(function(l){
+          if(l.cancelled||l.lead_status!=='הליד נסגר')return false;
+          var lNorm=normName(l.full_name);
+          return lNorm===impNorm;
+        });
+        return byNameClosed||null;
       }
 
       // בדוק כל שורה מהקובץ
@@ -4457,7 +4442,8 @@ async function handleTipulogUpload(input){
           if(prevAppt&&prevAppt.deduction_amount!==imp.price&&match.source==='tipulog'){
             conflicts.push({lead:match,appt:prevAppt,imp:imp,type:'price_conflict'});
           } else {
-            toConfirm.push({lead:match,imp:imp});
+            var matchType=match.lead_status==='הליד נסגר'?'closed':'active';
+            toConfirm.push({lead:match,imp:imp,matchType:matchType});
           }
         } else {
           toCreate.push({imp:imp});
@@ -4485,8 +4471,20 @@ async function handleTipulogUpload(input){
         }
       });
 
+      // ★ חדש: התראה — אומת ע"י מזכירה אך לא בטיפולוג
+      var confirmedNotInTipulog=(existingLeads||[]).filter(function(l){
+        if(l.cancelled||l.tipulog_synced)return false;
+        if(!l.appointment_confirmed&&!l.appointment_done)return false;
+        if(!l.appointment_date||l.appointment_date<minDate||l.appointment_date>maxDate)return false;
+        var found=importRows.find(function(imp){
+          if(imp.date!==l.appointment_date)return false;
+          return normName(imp.full_name)===normName(l.full_name)||
+            (imp.phone&&(imp.phone.replace(/[^0-9]/g,'').slice(-10)===(l.phone||'').replace(/[^0-9]/g,'').slice(-10)));
+        });
+        return !found;
+      });
       // הצג תוצאות ניתוח
-      showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,importRows,minDate,maxDate);
+      showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,confirmedNotInTipulog,importRows,minDate,maxDate);
 
     } catch(err){
       resultEl.innerHTML='<p style="color:#e53935">שגיאה בקריאת הקובץ: '+err.message+'</p>';
@@ -4495,7 +4493,7 @@ async function handleTipulogUpload(input){
   reader.readAsArrayBuffer(file);
 }
 
-function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,importRows,minDate,maxDate){
+function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,confirmedNotInTipulog,importRows,minDate,maxDate){
   var el=document.getElementById('tipulog-import-result');
   if(!el)return;
 
@@ -4527,21 +4525,10 @@ function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,im
 
   // יבוטלו
   if(toCancel.length){
-    html+='<div style="margin-bottom:12px">';
-    html+='<div style="font-weight:600;color:#e53935;padding:8px 0;margin-bottom:6px">⚠️ '+toCancel.length+' תורים שלא בוצעו — בחר פעולה לכל תור:</div>';
-    html+='<div style="max-height:280px;overflow-y:auto;border:1px solid #ffe0e0;border-radius:8px">';
-    toCancel.forEach(function(tc,idx){
-      html+='<div style="padding:8px 10px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
-      html+='<span style="font-size:12px;flex:1;min-width:180px">'+tc.lead.full_name+' | '+tc.lead.appointment_date+' | '+(tc.lead.doctor||'').replace(/ד"ר /g,''). slice(0,20)+'</span>';
-      html+='<select id="cancel-action-'+idx+'" onchange="updateCancelAction('+idx+',this.value)" style="font-size:12px;padding:3px 6px;border:1px solid #ddd;border-radius:6px">';
-      html+='<option value="cancel">❌ בוטל</option>';
-      html+='<option value="postpone">📅 נדחה — תאריך חדש</option>';
-      html+='<option value="keep">⏳ השאר ממתין</option>';
-      html+='</select>';
-      html+='<input id="postpone-date-'+idx+'" type="date" style="display:none;font-size:12px;padding:3px 6px;border:1px solid #ddd;border-radius:6px" onchange="updatePostponeDate('+idx+',this.value)">';
-      html+='</div>';
-    });
-    html+='</div></div>';
+    html+='<details style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:600;color:#e53935;padding:8px 0">❌ '+toCancel.length+' תורים יבוטלו (לחץ לפירוט)</summary>';
+    html+='<div style="max-height:150px;overflow-y:auto;margin-top:8px">';
+    toCancel.forEach(function(c){html+='<div style="padding:4px 8px;font-size:12px;border-bottom:1px solid #f0f0f0">'+c.lead.full_name+' | '+c.lead.appointment_date+' | '+(c.lead.doctor||'')+'</div>';});
+    html+='</div></details>';
   }
 
   // חסרי טלפון
@@ -4550,6 +4537,19 @@ function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,im
     html+='<strong>📞 '+missingPhone.length+' מטופלים ללא טלפון</strong> — תיפתחנה משימות אוטומטיות למזכירות<br>';
     missingPhone.slice(0,5).forEach(function(m){html+=m.full_name+', ';});
     if(missingPhone.length>5)html+='ועוד '+(missingPhone.length-5)+'...';
+    html+='</div>';
+  }
+
+  // ★ התראה: אומת ע"י מזכירה אך לא בטיפולוג
+  if(confirmedNotInTipulog&&confirmedNotInTipulog.length){
+    html+='<div style="background:#fff8e1;border:1.5px solid #ffa000;border-radius:8px;padding:12px;margin-bottom:12px">';
+    html+='<div style="font-weight:700;color:#e65100;margin-bottom:8px">⚠️ '+confirmedNotInTipulog.length+' תורים אומתו ע"י מזכירה אך לא נמצאו בטיפולוג</div>';
+    html+='<div style="max-height:120px;overflow-y:auto;font-size:12px">';
+    confirmedNotInTipulog.forEach(function(l){
+      html+='<div style="padding:4px 8px;border-bottom:1px solid #ffe082">'+l.full_name+' | '+l.appointment_date+' | ₪'+(l.deduction_amount||0)+'</div>';
+    });
+    html+='</div>';
+    html+='<div style="font-size:11px;color:#757575;margin-top:6px">ייתכן שהתורים בוטלו או לא חויבו בטיפולוג. ניתן להמשיך לייבוא.</div>';
     html+='</div>';
   }
 
@@ -4567,18 +4567,6 @@ function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,im
   window._importData={toConfirm,toCreate,toCancel,conflicts,missingPhone,resolvedConflicts:{}};
 }
 
-function updateCancelAction(idx,val){
-  var dateInput=document.getElementById('postpone-date-'+idx);
-  if(dateInput)dateInput.style.display=val==='postpone'?'inline-block':'none';
-  if(!window._importData)return;
-  if(!window._importData.cancelActions)window._importData.cancelActions={};
-  window._importData.cancelActions[idx]=val;
-}
-function updatePostponeDate(idx,date){
-  if(!window._importData)return;
-  if(!window._importData.cancelDates)window._importData.cancelDates={};
-  window._importData.cancelDates[idx]=date;
-}
 function resolveConflict(idx,choice){
   if(!window._importData)return;
   window._importData.resolvedConflicts[idx]=choice;
@@ -4608,7 +4596,9 @@ async function executeImport(){
     for(var i=0;i<d.toConfirm.length;i++){
       var c=d.toConfirm[i];
       var price=c.imp.price;
-      await db.from('leads').update({appointment_done:true,appointment_confirmed:true,appointment_time:c.imp.time||null,phone:c.imp.phone||c.lead.phone||null}).eq('id',c.lead.id);
+      var leadUpd={appointment_done:true,appointment_confirmed:true,tipulog_synced:true,deduction_amount:price||null,appointment_date:c.imp.date,appointment_time:c.imp.time||null,doctor:c.imp.doctor||c.lead.doctor||null,phone:c.imp.phone||c.lead.phone||null};
+      if(c.matchType==='closed')leadUpd.lead_status='נקבע תור';
+      await db.from('leads').update(leadUpd).eq('id',c.lead.id);
       // עדכן/צור appointment
       var existAppt=(await db.from('appointments').select('id').eq('lead_id',c.lead.id).eq('status','done')).data;
       if(existAppt&&existAppt.length){
@@ -4622,7 +4612,7 @@ async function executeImport(){
     // 2. צור לידים חדשים
     for(var j=0;j<d.toCreate.length;j++){
       var imp=d.toCreate[j].imp;
-      var newLead={full_name:imp.full_name,phone:imp.phone||null,doctor:imp.doctor||null,appointment_date:imp.date,appointment_time:imp.time||null,appointment_done:true,appointment_confirmed:true,lead_status:'נקבע תור',source:'טיפולוג',created_at:createdAtStr};
+      var newLead={full_name:imp.full_name,phone:imp.phone||null,doctor:imp.doctor||null,appointment_date:imp.date,appointment_time:imp.time||null,appointment_done:true,appointment_confirmed:true,tipulog_synced:true,deduction_amount:imp.price||null,lead_status:'נקבע תור',source:'טיפולוג',created_at:createdAtStr,original_date:imp.date,return_date:imp.date,secretary:'מרתה'};
       var leadRes=await db.from('leads').insert(newLead).select('id').single();
       if(leadRes.data){
         await db.from('appointments').insert({patient_name:imp.full_name,patient_phone:imp.phone||'',doctor:imp.doctor||'',date:imp.date,time:imp.time||'00:00',status:'done',deduction_amount:imp.price,lead_id:leadRes.data.id});
@@ -4634,22 +4624,11 @@ async function executeImport(){
       done++;
     }
 
-    // 3. טפל בתורים שלא בקובץ לפי בחירת המשתמש
-    var cancelActions=d.cancelActions||{};
-    var cancelDates=d.cancelDates||{};
+    // 3. בטל תורים שלא בקובץ
     for(var k=0;k<d.toCancel.length;k++){
       var lead=d.toCancel[k].lead;
-      var action=cancelActions[k]||'cancel';
-      if(action==='cancel'){
-        await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:'לא מופיע בייבוא טיפולוג'}).eq('id',lead.id);
-        await db.from('appointments').update({status:'cancelled'}).eq('lead_id',lead.id).eq('status','done');
-      } else if(action==='postpone'){
-        var newDate=cancelDates[k]||null;
-        var upd={lead_status:'נקבע תור',cancelled:false,appointment_done:false,appointment_confirmed:false};
-        if(newDate)upd.appointment_date=newDate;
-        await db.from('leads').update(upd).eq('id',lead.id);
-      }
-      // action==='keep' — לא עושים כלום, נשאר ממתין
+      await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:'לא מופיע בייבוא טיפולוג'}).eq('id',lead.id);
+      await db.from('appointments').update({status:'cancelled'}).eq('lead_id',lead.id).eq('status','done');
       done++;
     }
 
@@ -4802,178 +4781,92 @@ async function loadAdmin(){
   schemaHdr.textContent='📐 סכמות עבודה';
   el.appendChild(schemaHdr);
 
-  var schemaWrap=document.createElement('div');
-  schemaWrap.style.cssText='background:white;border-radius:12px;border:1px solid #eef0ff;padding:12px;margin-bottom:14px;box-shadow:0 2px 8px rgba(99,102,241,0.06);max-height:420px;overflow:hidden';
+  var schemaBox=document.createElement('div');
+  schemaBox.style.cssText='background:white;border-radius:14px;border:1px solid #eef0ff;padding:20px;margin-bottom:14px;box-shadow:0 2px 8px rgba(99,102,241,0.06)';
+  schemaBox.innerHTML='<style>.schema-tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}.schema-tab{padding:6px 16px;border-radius:20px;border:1px solid #e0e7ff;background:transparent;color:#64748b;font-size:12px;cursor:pointer;transition:all .15s;font-family:inherit}.schema-tab.active{background:#eef2ff;border-color:#6366f1;color:#4f46e5;font-weight:500}.schema-diagram{display:none}.schema-diagram.active{display:block}.schema-diagram svg{width:100%;overflow:visible}</style>'
+    +'<div class=\"schema-tabs\">'
+    +'<button class=\"schema-tab active\" onclick=\"showSchema(\'s-leads\',this)\">כניסת ליד חדש</button>'
+    +'<button class=\"schema-tab\" onclick=\"showSchema(\'s-tipulog\',this)\">ייבוא טיפולוג</button>'
+    +'<button class=\"schema-tab\" onclick=\"showSchema(\'s-revenue\',this)\">חישוב הכנסות</button>'
+    +'</div>'
+    +'<div class=\"schema-diagram active\" id=\"s-leads\"><svg viewBox=\"0 0 680 580\">'
+    +'<defs><marker id=\"sa1\" viewBox=\"0 0 10 10\" refX=\"8\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M2 1L8 5L2 9\" fill=\"none\" stroke=\"context-stroke\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></marker></defs>'
+    +'<rect x=\"240\" y=\"20\" width=\"200\" height=\"44\" rx=\"8\" fill=\"#f1f0e8\" stroke=\"#888780\" stroke-width=\"0.5\"/><text x=\"340\" y=\"42\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#444441\">פנייה נכנסת</text>'
+    +'<line x1=\"340\" y1=\"64\" x2=\"340\" y2=\"94\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/>'
+    +'<rect x=\"100\" y=\"94\" width=\"480\" height=\"44\" rx=\"8\" fill=\"#EEEDFE\" stroke=\"#534AB7\" stroke-width=\"0.5\"/><text x=\"340\" y=\"116\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#3C3489\">מקור: טלפון / וואטסאפ / אתר / מדיה</text>'
+    +'<line x1=\"340\" y1=\"138\" x2=\"340\" y2=\"168\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/>'
+    +'<rect x=\"180\" y=\"168\" width=\"320\" height=\"44\" rx=\"8\" fill=\"#f1f0e8\" stroke=\"#888780\" stroke-width=\"0.5\"/><text x=\"340\" y=\"190\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#444441\">בדיקת פרטים מינימליים</text>'
+    +'<line x1=\"180\" y1=\"190\" x2=\"100\" y2=\"190\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/><text x=\"138\" y=\"183\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">חסר</text>'
+    +'<rect x=\"20\" y=\"168\" width=\"80\" height=\"44\" rx=\"8\" fill=\"#FCEBEB\" stroke=\"#A32D2D\" stroke-width=\"0.5\"/><text x=\"60\" y=\"190\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" font-weight=\"500\" fill=\"#791F1F\">לא רלוונטי</text>'
+    +'<line x1=\"340\" y1=\"212\" x2=\"340\" y2=\"242\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/><text x=\"356\" y=\"230\" font-size=\"11\" fill=\"#888\">תקין</text>'
+    +'<rect x=\"160\" y=\"242\" width=\"360\" height=\"44\" rx=\"8\" fill=\"#E6F1FB\" stroke=\"#185FA5\" stroke-width=\"0.5\"/><text x=\"340\" y=\"264\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#0C447C\">מזכירה רושמת ליד + מגיבה</text>'
+    +'<line x1=\"340\" y1=\"286\" x2=\"340\" y2=\"316\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/>'
+    +'<rect x=\"180\" y=\"316\" width=\"320\" height=\"44\" rx=\"8\" fill=\"#f1f0e8\" stroke=\"#888780\" stroke-width=\"0.5\"/><text x=\"340\" y=\"338\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#444441\">האם נקבע תור?</text>'
+    +'<line x1=\"180\" y1=\"338\" x2=\"80\" y2=\"338\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/><text x=\"128\" y=\"331\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">לא</text>'
+    +'<rect x=\"20\" y=\"316\" width=\"60\" height=\"44\" rx=\"8\" fill=\"#FAEEDA\" stroke=\"#BA7517\" stroke-width=\"0.5\"/><text x=\"50\" y=\"338\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" font-weight=\"500\" fill=\"#633806\">מעקב</text>'
+    +'<line x1=\"340\" y1=\"360\" x2=\"340\" y2=\"390\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/><text x=\"356\" y=\"378\" font-size=\"11\" fill=\"#888\">כן</text>'
+    +'<rect x=\"160\" y=\"390\" width=\"360\" height=\"44\" rx=\"8\" fill=\"#E1F5EE\" stroke=\"#1D9E75\" stroke-width=\"0.5\"/><text x=\"340\" y=\"412\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#085041\">נקבע תור — תאריך + שעה + רופא</text>'
+    +'<line x1=\"340\" y1=\"434\" x2=\"340\" y2=\"464\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/>'
+    +'<rect x=\"160\" y=\"464\" width=\"320\" height=\"44\" rx=\"8\" fill=\"#f1f0e8\" stroke=\"#888780\" stroke-width=\"0.5\"/><text x=\"340\" y=\"486\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#444441\">תאריך התור חלף?</text>'
+    +'<line x1=\"480\" y1=\"486\" x2=\"560\" y2=\"486\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/><text x=\"518\" y=\"479\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">לא עדיין</text>'
+    +'<rect x=\"560\" y=\"464\" width=\"80\" height=\"44\" rx=\"8\" fill=\"#E6F1FB\" stroke=\"#185FA5\" stroke-width=\"0.5\"/><text x=\"600\" y=\"486\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"12\" font-weight=\"500\" fill=\"#0C447C\">עתידי</text>'
+    +'<line x1=\"340\" y1=\"508\" x2=\"340\" y2=\"538\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/><text x=\"356\" y=\"526\" font-size=\"11\" fill=\"#888\">כן</text>'
+    +'<rect x=\"120\" y=\"538\" width=\"220\" height=\"40\" rx=\"8\" fill=\"#f1f0e8\" stroke=\"#888780\" stroke-width=\"0.5\"/><text x=\"230\" y=\"558\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#444441\">בטיפולוג?</text>'
+    +'<line x1=\"120\" y1=\"558\" x2=\"60\" y2=\"558\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/><text x=\"88\" y=\"551\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">לא</text>'
+    +'<rect x=\"10\" y=\"538\" width=\"50\" height=\"40\" rx=\"8\" fill=\"#FCEBEB\" stroke=\"#A32D2D\" stroke-width=\"0.5\"/><text x=\"35\" y=\"558\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" font-weight=\"500\" fill=\"#791F1F\">בוטל</text>'
+    +'<line x1=\"340\" y1=\"558\" x2=\"420\" y2=\"558\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa1)\"/><text x=\"378\" y=\"551\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">כן</text>'
+    +'<rect x=\"420\" y=\"538\" width=\"80\" height=\"40\" rx=\"8\" fill=\"#E1F5EE\" stroke=\"#1D9E75\" stroke-width=\"0.5\"/><text x=\"460\" y=\"558\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"12\" font-weight=\"500\" fill=\"#085041\">מאומת ✓</text>'
+    +'</svg></div>'
+    +'<div class=\"schema-diagram\" id=\"s-tipulog\"><svg viewBox=\"0 0 680 480\">'
+    +'<defs><marker id=\"sa2\" viewBox=\"0 0 10 10\" refX=\"8\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M2 1L8 5L2 9\" fill=\"none\" stroke=\"context-stroke\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></marker></defs>'
+    +'<rect x=\"200\" y=\"20\" width=\"280\" height=\"44\" rx=\"8\" fill=\"#EEEDFE\" stroke=\"#534AB7\" stroke-width=\"0.5\"/><text x=\"340\" y=\"42\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#3C3489\">ייבוא טבלת טיפולוג (ADMIN)</text>'
+    +'<line x1=\"340\" y1=\"64\" x2=\"340\" y2=\"94\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/>'
+    +'<rect x=\"160\" y=\"94\" width=\"360\" height=\"44\" rx=\"8\" fill=\"#f1f0e8\" stroke=\"#888780\" stroke-width=\"0.5\"/><text x=\"340\" y=\"116\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#444441\">לכל שורה: האם קיים ליד במערכת?</text>'
+    +'<line x1=\"160\" y1=\"116\" x2=\"80\" y2=\"116\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/><line x1=\"80\" y1=\"116\" x2=\"80\" y2=\"180\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/><text x=\"118\" y=\"109\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">כן</text>'
+    +'<rect x=\"20\" y=\"180\" width=\"120\" height=\"44\" rx=\"8\" fill=\"#f1f0e8\" stroke=\"#888780\" stroke-width=\"0.5\"/><text x=\"80\" y=\"202\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"12\" font-weight=\"500\" fill=\"#444441\">מופיע בטיפולוג?</text>'
+    +'<line x1=\"140\" y1=\"202\" x2=\"200\" y2=\"202\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/><text x=\"168\" y=\"195\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">כן</text>'
+    +'<rect x=\"200\" y=\"180\" width=\"140\" height=\"44\" rx=\"8\" fill=\"#E1F5EE\" stroke=\"#1D9E75\" stroke-width=\"0.5\"/><text x=\"270\" y=\"194\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"12\" font-weight=\"500\" fill=\"#085041\">מאומת ✓</text><text x=\"270\" y=\"212\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#0F6E56\">סכום מטיפולוג</text>'
+    +'<line x1=\"80\" y1=\"224\" x2=\"80\" y2=\"264\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/><text x=\"96\" y=\"248\" font-size=\"11\" fill=\"#888\">לא</text>'
+    +'<rect x=\"20\" y=\"264\" width=\"120\" height=\"44\" rx=\"8\" fill=\"#FAEEDA\" stroke=\"#BA7517\" stroke-width=\"0.5\"/><text x=\"80\" y=\"278\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"12\" font-weight=\"500\" fill=\"#633806\">התראה</text><text x=\"80\" y=\"296\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#854F0B\">לא בטיפולוג</text>'
+    +'<line x1=\"80\" y1=\"308\" x2=\"80\" y2=\"348\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/>'
+    +'<rect x=\"20\" y=\"348\" width=\"120\" height=\"44\" rx=\"8\" fill=\"#f1f0e8\" stroke=\"#888780\" stroke-width=\"0.5\"/><text x=\"80\" y=\"370\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"12\" font-weight=\"500\" fill=\"#444441\">בחירת משתמש</text>'
+    +'<line x1=\"20\" y1=\"392\" x2=\"20\" y2=\"430\" stroke=\"#888780\" stroke-width=\"0.5\" stroke-dasharray=\"3 3\"/><line x1=\"20\" y1=\"430\" x2=\"38\" y2=\"430\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/><text x=\"12\" y=\"384\" font-size=\"10\" fill=\"#888\">בוצע</text>'
+    +'<rect x=\"38\" y=\"412\" width=\"60\" height=\"36\" rx=\"8\" fill=\"#E1F5EE\" stroke=\"#1D9E75\" stroke-width=\"0.5\"/><text x=\"68\" y=\"430\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" font-weight=\"500\" fill=\"#085041\">מאומת</text>'
+    +'<line x1=\"140\" y1=\"392\" x2=\"158\" y2=\"392\" stroke=\"#888780\" stroke-width=\"0.5\" stroke-dasharray=\"3 3\"/><line x1=\"158\" y1=\"392\" x2=\"158\" y2=\"430\" stroke=\"#888780\" stroke-width=\"0.5\" stroke-dasharray=\"3 3\"/><line x1=\"158\" y1=\"430\" x2=\"142\" y2=\"430\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/><text x=\"152\" y=\"384\" font-size=\"10\" fill=\"#888\">בוטל</text>'
+    +'<rect x=\"102\" y=\"412\" width=\"40\" height=\"36\" rx=\"8\" fill=\"#FCEBEB\" stroke=\"#A32D2D\" stroke-width=\"0.5\"/><text x=\"122\" y=\"430\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" font-weight=\"500\" fill=\"#791F1F\">בוטל</text>'
+    +'<line x1=\"520\" y1=\"116\" x2=\"600\" y2=\"116\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/><line x1=\"600\" y1=\"116\" x2=\"600\" y2=\"180\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/><text x=\"558\" y=\"109\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">לא — חדש</text>'
+    +'<rect x=\"530\" y=\"180\" width=\"130\" height=\"56\" rx=\"8\" fill=\"#E6F1FB\" stroke=\"#185FA5\" stroke-width=\"0.5\"/><text x=\"595\" y=\"200\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"12\" font-weight=\"500\" fill=\"#0C447C\">ליד חדש נוצר</text><text x=\"595\" y=\"220\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#185FA5\">נקבע תור + סכום</text>'
+    +'<line x1=\"595\" y1=\"236\" x2=\"595\" y2=\"280\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa2)\"/>'
+    +'<rect x=\"530\" y=\"280\" width=\"130\" height=\"44\" rx=\"8\" fill=\"#E1F5EE\" stroke=\"#1D9E75\" stroke-width=\"0.5\"/><text x=\"595\" y=\"294\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"12\" font-weight=\"500\" fill=\"#085041\">מאומת ✓</text><text x=\"595\" y=\"312\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#0F6E56\">מהימן ביותר</text>'
+    +'</svg></div>'
+    +'<div class=\"schema-diagram\" id=\"s-revenue\"><svg viewBox=\"0 0 680 420\">'
+    +'<defs><marker id=\"sa3\" viewBox=\"0 0 10 10\" refX=\"8\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M2 1L8 5L2 9\" fill=\"none\" stroke=\"context-stroke\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></marker></defs>'
+    +'<text x=\"340\" y=\"30\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"500\" fill=\"#1e293b\">מקורות אימות</text>'
+    +'<rect x=\"40\" y=\"50\" width=\"180\" height=\"60\" rx=\"8\" fill=\"#E1F5EE\" stroke=\"#1D9E75\" stroke-width=\"0.5\"/><text x=\"130\" y=\"72\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#085041\">טיפולוג</text><text x=\"130\" y=\"92\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#0F6E56\">המהימן ביותר</text>'
+    +'<rect x=\"250\" y=\"50\" width=\"180\" height=\"60\" rx=\"8\" fill=\"#E6F1FB\" stroke=\"#185FA5\" stroke-width=\"0.5\"/><text x=\"340\" y=\"72\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#0C447C\">אישור מזכירה</text><text x=\"340\" y=\"92\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#185FA5\">סכום ידני</text>'
+    +'<rect x=\"460\" y=\"50\" width=\"180\" height=\"60\" rx=\"8\" fill=\"#FAEEDA\" stroke=\"#BA7517\" stroke-width=\"0.5\"/><text x=\"550\" y=\"72\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#633806\">ממתין לאימות</text><text x=\"550\" y=\"92\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#854F0B\">תאריך עבר, לא אושר</text>'
+    +'<line x1=\"130\" y1=\"110\" x2=\"130\" y2=\"170\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa3)\"/>'
+    +'<line x1=\"340\" y1=\"110\" x2=\"280\" y2=\"170\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa3)\"/>'
+    +'<line x1=\"550\" y1=\"110\" x2=\"430\" y2=\"230\" stroke=\"#888\" stroke-width=\"0.8\" stroke-dasharray=\"4 3\" marker-end=\"url(#sa3)\"/>'
+    +'<rect x=\"80\" y=\"170\" width=\"320\" height=\"56\" rx=\"10\" fill=\"#E1F5EE\" stroke=\"#1D9E75\" stroke-width=\"1\"/><text x=\"240\" y=\"192\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#085041\">✅ סה&quot;כ מאומת</text><text x=\"240\" y=\"212\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#0F6E56\">Σ תורים שאושרו × סכום אמיתי</text>'
+    +'<line x1=\"240\" y1=\"226\" x2=\"240\" y2=\"256\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa3)\"/>'
+    +'<text x=\"430\" y=\"250\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">+ ממתינים ×800₪</text>'
+    +'<line x1=\"430\" y1=\"230\" x2=\"360\" y2=\"270\" stroke=\"#888\" stroke-width=\"0.8\" stroke-dasharray=\"4 3\" marker-end=\"url(#sa3)\"/>'
+    +'<rect x=\"80\" y=\"256\" width=\"320\" height=\"56\" rx=\"10\" fill=\"#FAEEDA\" stroke=\"#BA7517\" stroke-width=\"1\"/><text x=\"240\" y=\"278\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#633806\">⏳ מוערך (עד היום)</text><text x=\"240\" y=\"298\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#854F0B\">מאומת + ממתינים ×800₪</text>'
+    +'<line x1=\"240\" y1=\"312\" x2=\"240\" y2=\"342\" stroke=\"#888\" stroke-width=\"1\" marker-end=\"url(#sa3)\"/>'
+    +'<text x=\"430\" y=\"336\" text-anchor=\"middle\" font-size=\"11\" fill=\"#888\">+ עתידיים ×800₪</text>'
+    +'<line x1=\"430\" y1=\"336\" x2=\"360\" y2=\"356\" stroke=\"#888\" stroke-width=\"0.8\" stroke-dasharray=\"4 3\" marker-end=\"url(#sa3)\"/>'
+    +'<rect x=\"80\" y=\"342\" width=\"320\" height=\"56\" rx=\"10\" fill=\"#EEEDFE\" stroke=\"#534AB7\" stroke-width=\"1\"/><text x=\"240\" y=\"364\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#3C3489\">💳 צפי הכנסות החודש</text><text x=\"240\" y=\"384\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#534AB7\">מוערך + עתידיים ×800₪</text>'
+    +'<rect x=\"460\" y=\"342\" width=\"180\" height=\"56\" rx=\"8\" fill=\"#FCEBEB\" stroke=\"#A32D2D\" stroke-width=\"0.5\"/><text x=\"550\" y=\"364\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"13\" font-weight=\"500\" fill=\"#791F1F\">🚫 בוטל / נדחה</text><text x=\"550\" y=\"384\" text-anchor=\"middle\" dominant-baseline=\"central\" font-size=\"11\" fill=\"#A32D2D\">לא נכנס לחישוב</text>'
+    +'</svg></div>';
+  el.appendChild(schemaBox);
 
-  // Tabs
-  var tabBar=document.createElement('div');
-  tabBar.style.cssText='display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap';
-  var tabDefs=[
-    {id:'st1',label:'1 — כניסת ליד'},
-    {id:'st2',label:'2 — אישור תור'},
-    {id:'st3',label:'3 — ייבוא טיפולוג'},
-    {id:'st4',label:'4 — חישוב הכנסות'}
-  ];
-  tabDefs.forEach(function(td,i){
-    var btn=document.createElement('button');
-    btn.type='button';
-    btn.style.cssText='padding:5px 14px;border-radius:20px;border:1px solid #e0e7ff;background:transparent;color:#64748b;font-size:12px;cursor:pointer;font-family:inherit;transition:all .15s';
-    btn.textContent=td.label;
-    btn.dataset.target=td.id;
-    if(i===0){btn.style.background='#eef2ff';btn.style.borderColor='#6366f1';btn.style.color='#4f46e5';btn.style.fontWeight='500';}
-    btn.onclick=function(){
-      schemaWrap.querySelectorAll('.schema-panel').forEach(function(p){p.style.display='none';});
-      tabBar.querySelectorAll('button').forEach(function(b){
-        b.style.background='transparent';b.style.borderColor='#e0e7ff';b.style.color='#64748b';b.style.fontWeight='400';
-      });
-      schemaWrap.querySelector('#'+td.id).style.display='block';
-      btn.style.background='#eef2ff';btn.style.borderColor='#6366f1';btn.style.color='#4f46e5';btn.style.fontWeight='500';
-    };
-    tabBar.appendChild(btn);
-  });
-  schemaWrap.appendChild(tabBar);
-
-  function makeSVG(vb,content){
-    var div=document.createElement('div');
-    div.innerHTML='<svg width="100%" viewBox="'+vb+'" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">'+
-      '<defs><marker id="sar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">'+
-      '<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>'+
-      content+'</svg>';
-    return div.firstChild;
-  }
-
-  function box(x,y,w,h,fill,stroke,title,sub){
-    var r='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="8" fill="'+fill+'" stroke="'+stroke+'" stroke-width="0.5"/>';
-    var ty=sub?y+h/2-8:y+h/2;
-    r+='<text x="'+(x+w/2)+'" y="'+ty+'" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="'+stroke.replace('0.5','')+'">'+title+'</text>';
-    if(sub)r+='<text x="'+(x+w/2)+'" y="'+(y+h/2+8)+'" text-anchor="middle" dominant-baseline="central" font-size="11" fill="'+stroke+'">'+sub+'</text>';
-    return r;
-  }
-  function arr(x1,y1,x2,y2,dash){
-    return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="#888" stroke-width="1" opacity=".5"'+(dash?' stroke-dasharray="4 3"':'')+' marker-end="url(#sar)"/>';
-  }
-  function lbl(x,y,txt,anchor){
-    return '<text x="'+x+'" y="'+y+'" text-anchor="'+(anchor||'middle')+'" font-size="11" fill="#888">'+txt+'</text>';
-  }
-
-  // Colors
-  var COL={
-    gray:{f:'#f1f0e8',s:'#888780',t:'#444441'},
-    purple:{f:'#EEEDFE',s:'#534AB7',t:'#3C3489'},
-    teal:{f:'#E1F5EE',s:'#1D9E75',t:'#085041'},
-    blue:{f:'#E6F1FB',s:'#185FA5',t:'#0C447C'},
-    amber:{f:'#FAEEDA',s:'#BA7517',t:'#633806'},
-    coral:{f:'#FCEBEB',s:'#A32D2D',t:'#791F1F'}
+  window.showSchema=function(id,btn){
+    document.querySelectorAll('.schema-diagram').forEach(function(d){d.classList.remove('active');});
+    document.querySelectorAll('.schema-tab').forEach(function(t){t.classList.remove('active');});
+    document.getElementById(id).classList.add('active');
+    btn.classList.add('active');
   };
-  function bx(x,y,w,h,col,title,sub){
-    var c=COL[col];
-    var r='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="8" fill="'+c.f+'" stroke="'+c.s+'" stroke-width="0.5"/>';
-    var ty=sub?y+h/2-9:y+h/2;
-    r+='<text x="'+(x+w/2)+'" y="'+ty+'" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="'+c.t+'">'+title+'</text>';
-    if(sub)r+='<text x="'+(x+w/2)+'" y="'+(y+h/2+9)+'" text-anchor="middle" dominant-baseline="central" font-size="11" fill="'+c.s+'">'+sub+'</text>';
-    return r;
-  }
-
-  // Panel 1: כניסת ליד
-  var p1=document.createElement('div');p1.className='schema-panel';p1.id='st1';
-  var s1='';
-  s1+=bx(220,20,240,44,'gray','פנייה נכנסת למערכת','');
-  s1+=arr(340,64,340,94);
-  s1+=bx(100,94,480,44,'purple','מקור: טלפון / וואטסאפ / אתר / מדיה','');
-  s1+=arr(340,138,340,168);
-  s1+=bx(180,168,320,56,'gray','פרטים מינימליים','שם + טלפון חובה');
-  s1+=arr(180,196,100,196);s1+=lbl(138,190,'חסר');
-  s1+=bx(18,168,82,44,'coral','לא רלוונטי','');
-  s1+=arr(340,224,340,254);s1+=lbl(356,243,'תקין','start');
-  s1+=bx(160,254,360,44,'blue','מזכירה פותחת ליד + מגיבה','');
-  s1+=arr(340,298,340,328);
-  s1+=bx(180,328,320,56,'gray','סטטוס = נקבע תור?','חובה: רופא + תאריך + שעה');
-  s1+=arr(180,356,100,356);s1+=lbl(138,350,'לא');
-  s1+=bx(18,328,82,44,'amber','מעקב / סגור','');
-  s1+=arr(340,384,340,414);s1+=lbl(356,402,'כן','start');
-  s1+=bx(160,414,360,56,'teal','ליד נשמר — תור עתידי פעיל','appointment_date + time מוגדרים');
-  s1+=arr(340,470,340,500,true);s1+=lbl(356,488,'זמן עובר...','start');
-  s1+=bx(160,500,360,44,'amber','שעת תור + 15 דקות עברה','⟶ פאנל 2: אישור תור');
-  p1.appendChild(makeSVG('0 0 680 420',s1));
-  schemaWrap.appendChild(p1);
-
-  // Panel 2: אישור תור
-  var p2=document.createElement('div');p2.className='schema-panel';p2.id='st2';p2.style.display='none';
-  var s2='';
-  s2+=bx(160,20,360,56,'amber','⚠️ תור ממתין לאישור','appointment_date ≤ היום, appointment_done=false');
-  s2+=arr(340,76,340,106);
-  s2+=bx(160,106,360,44,'gray','חלונית אישור מוצגת למזכירה','');
-  s2+=arr(160,128,80,128);s2+=lbl(118,122,'נדחה');
-  s2+=arr(340,150,340,180);s2+=lbl(356,168,'בוצע + סכום','start');
-  s2+=arr(520,128,600,128);s2+=lbl(558,122,'בוטל');
-  s2+=bx(18,106,62,44,'amber','תאריך חדש','');
-  s2+='<path d="M49 150 L49 380 L200 380" fill="none" stroke="#888" stroke-width="1" opacity=".4" stroke-dasharray="3 3" marker-end="url(#sar)"/>';
-  s2+=bx(600,106,62,44,'coral','בוטל','');
-  s2+=bx(180,180,320,44,'gray','מזכירה מכניסה סכום מפגש','');
-  s2+=arr(340,224,340,254);
-  s2+=bx(180,254,320,56,'teal','👤 מאושר ידנית','appointment_done=true | deduction_amount=סכום');
-  s2+=arr(340,310,340,350,true);
-  s2+=bx(180,350,320,44,'blue','מופיע ברשימת תורים שבוצעו 🔵','');
-  s2+=arr(340,394,340,430,true);
-  s2+=bx(180,430,320,44,'purple','נכנס לחישוב הכנסות ← פאנל 4','');
-  p2.appendChild(makeSVG('0 0 680 380',s2));
-  schemaWrap.appendChild(p2);
-
-  // Panel 3: טיפולוג
-  var p3=document.createElement('div');p3.className='schema-panel';p3.id='st3';p3.style.display='none';
-  var s3='';
-  s3+=bx(180,20,320,56,'purple','ייבוא טבלת טיפולוג (ADMIN)','השוואה: טלפון + תאריך תור');
-  s3+=arr(340,76,340,106);
-  s3+=bx(160,106,360,44,'gray','3 מקרים לכל שורה בטיפולוג','');
-  s3+=arr(220,150,140,190);
-  s3+=bx(20,190,240,70,'teal','א — קיים + תואם','סכום שונה → עדכן אוטומטית ✅');
-  s3+=arr(340,150,340,190);
-  s3+=bx(210,190,260,70,'blue','ב — בטיפולוג, לא במערכת','ליד חדש + appointment_done=true ✅');
-  s3+=arr(460,150,540,190);
-  s3+=bx(420,190,240,70,'amber','ג — במערכת, לא בטיפולוג','התראה ⚠️ | משתמש בוחר: בוטל / נדחה');
-  s3+=arr(140,260,220,330);s3+=arr(340,260,300,330);
-  s3+=bx(80,330,320,56,'teal','✅ רשימת תורים שבוצעו','appointment_done=true | סכום מטיפולוג 🟢');
-  s3+=arr(540,260,540,330);
-  s3+=bx(430,330,230,56,'gray','בחירת משתמש','בוטל / נדחה לתאריך חדש');
-  s3+=arr(240,386,240,430,true);
-  s3+=bx(80,430,320,44,'purple','נכנס לחישוב הכנסות ← פאנל 4','');
-  s3+='<rect x="80" y="500" width="560" height="50" rx="8" fill="#f1f0e8" stroke="#888780" stroke-width="0.5"/>';
-  s3+='<text x="360" y="517" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#444441">כלל: טיפולוג = אמת מוחלטת</text>';
-  s3+='<text x="360" y="537" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#888780">חוסר התאמה בסכום בלבד → עדכון אוטומטי ללא שאלה</text>';
-  p3.appendChild(makeSVG('0 0 680 430',s3));
-  schemaWrap.appendChild(p3);
-
-  // Panel 4: הכנסות
-  var p4=document.createElement('div');p4.className='schema-panel';p4.id='st4';p4.style.display='none';
-  var s4='';
-  s4+='<text x="340" y="26" text-anchor="middle" font-size="14" font-weight="500" fill="#1e293b">חישוב הכנסות — חודש נוכחי בלבד</text>';
-  s4+='<text x="340" y="46" text-anchor="middle" font-size="11" fill="#888">מ-1 בחודש עד היום / עד סוף החודש</text>';
-  s4+=bx(30,66,180,56,'teal','🟢 מאושר טיפולוג','appointment_done=true');
-  s4+=bx(250,66,180,56,'blue','🔵 מאושר ידנית','appointment_done=true');
-  s4+=bx(470,66,180,56,'amber','⏳ ממתין לאישור','תאריך עבר, לא done');
-  s4+=arr(120,122,200,190);s4+=arr(340,122,310,190);
-  s4+='<line x1="560" y1="122" x2="480" y2="258" stroke="#888" stroke-width="1" opacity=".4" stroke-dasharray="4 3" marker-end="url(#sar)"/>';
-  s4+=bx(80,190,340,56,'teal','Σ סכום מאומת','deduction_amount WHERE appointment_done=true');
-  s4+=arr(250,246,250,288);s4+=lbl(400,276,'+ ממתינים × 800₪','start');
-  s4+='<rect x="40" y="288" width="600" height="70" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.5"/>';
-  s4+='<text x="340" y="314" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#3C3489">💰 הכנסות עד היום</text>';
-  s4+='<text x="340" y="334" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#534AB7">= מאומת + (ממתינים × 800₪)</text>';
-  s4+='<text x="340" y="350" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#534AB7">appointment_date: 1 בחודש → היום</text>';
-  s4+=bx(40,376,600,50,'gray','% דיוק = מאומתים ÷ (מאומתים + ממתינים)','100% = כל התורים שעברו אומתו');
-  s4+='<line x1="40" y1="448" x2="640" y2="448" stroke="#888" stroke-width="0.5" opacity=".25" stroke-dasharray="6 4"/>';
-  s4+='<text x="340" y="444" text-anchor="middle" font-size="11" fill="#888">תחזית לסוף החודש</text>';
-  s4+=bx(450,458,190,50,'gray','תורים עתידיים','appointment_date: מחר → סוף חודש');
-  s4+=arr(340,426,340,476,true);
-  s4+='<line x1="545" y1="508" x2="480" y2="544" stroke="#888" stroke-width="1" opacity=".4" stroke-dasharray="4 3" marker-end="url(#sar)"/>';
-  s4+=lbl(524,534,'× 800₪');
-  s4+='<rect x="40" y="544" width="600" height="70" rx="10" fill="#FAEEDA" stroke="#BA7517" stroke-width="1.5"/>';
-  s4+='<text x="340" y="570" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#633806">📅 הכנסות צפויות — סוף החודש</text>';
-  s4+='<text x="340" y="590" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#BA7517">= הכנסות עד היום + (עתידיים × 800₪)</text>';
-  s4+='<text x="340" y="608" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#BA7517">appointment_date: 1 בחודש → סוף חודש</text>';
-  p4.appendChild(makeSVG('0 0 680 470',s4));
-  schemaWrap.appendChild(p4);
-
-  el.appendChild(schemaWrap);
 
   // ===== לוגיקת חישוב הכנסות =====
   var logicHdr=document.createElement('div');
@@ -5326,55 +5219,18 @@ async function checkApptNotifications(){
   var myR2=(myU2&&myU2.roles)||[];
   var isDocOnly2=(myR2.includes('doctor')&&!myR2.includes('admin')&&!myR2.includes('secretary'))||currentRole==='doctor';
   if(isDocOnly2)return;
-  if(!isPopupEnabled('appt_confirm'))return;
 
   var now=new Date();
-  function pad(n){return n<10?'0'+n:n;}
-  var todayStr=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
+  var todayStr=now.toISOString().slice(0,10);
   var currentMins=now.getHours()*60+now.getMinutes();
   var currentTime=now.toTimeString().slice(0,5);
 
-  // בדוק תורים מהיום
   var{data:todayLeads}=await db.from('leads')
-    .select('id,full_name,appointment_time,doctor,appointment_date,lead_status,phone,appointment_done,appointment_confirmed,deduction_amount,source,secretary')
+    .select('id,full_name,appointment_time,doctor,appointment_date,lead_status,phone,appointment_done,appointment_confirmed')
     .eq('appointment_date',todayStr)
     .not('lead_status','eq','בוטל')
     .eq('cancelled',false);
   if(!todayLeads)return;
-
-  // בדוק גם תורים מימים קודמים שלא אושרו (עד 7 ימים אחורה)
-  var pastDate=new Date(now);pastDate.setDate(pastDate.getDate()-7);
-  function pad2(n){return n<10?'0'+n:n;}
-  var pastStr=pastDate.getFullYear()+'-'+pad2(pastDate.getMonth()+1)+'-'+pad2(pastDate.getDate());
-  var{data:pastLeads}=await db.from('leads')
-    .select('id,full_name,appointment_time,doctor,appointment_date,lead_status,phone,appointment_done,appointment_confirmed,deduction_amount,source,secretary')
-    .gte('appointment_date',pastStr)
-    .lt('appointment_date',todayStr)
-    .eq('lead_status','נקבע תור')
-    .eq('cancelled',false)
-    .eq('appointment_done',false);
-  // הצג חלונית לתורי עבר שלא אושרו (עד 3 בכל פעם)
-  if(pastLeads&&pastLeads.length>0){
-    var toShow=pastLeads.filter(function(l){return !completionNotified.has(l.id);}).slice(0,3);
-    if(toShow.length>0&&!window._pastPopupShown){
-      window._pastPopupShown=true;
-      var idx=0;
-      function showNext(){
-        if(idx>=toShow.length)return;
-        var lead=toShow[idx++];
-        completionNotified.add(lead.id);
-        showApptConfirmModal(lead,function(amount){
-          var upd={appointment_confirmed:true,appointment_done:true};
-          if(amount&&parseFloat(amount)>0)upd.deduction_amount=parseFloat(amount);
-          db.from('leads').update(upd).eq('id',lead.id).then(function(){
-            if(typeof loadAppointmentsLog==='function')loadAppointmentsLog();
-            setTimeout(showNext,500);
-          });
-        },0);
-      }
-      showNext();
-    }
-  }
 
   var unconfirmed=[];
   todayLeads.forEach(function(l){
@@ -5593,7 +5449,6 @@ function printTodayAppts(){
 // LOG מפגשים — תורים שבוצעו
 // ============================================================
 var allAppointmentsLog=[];
-var _snoozeCount={};
 
 // מצב פילטר LOG
 var _logPeriod='today';
@@ -5636,28 +5491,21 @@ async function loadAppointmentsLog(){
 
   var searchQ=(document.getElementById('log-search').value||'').trim().toLowerCase().replace(/-/g,'');
 
-  // מקורות: leads.appointment_done=true + appointments.status='done' (ידני)
-  var qLeads=db.from('leads')
+  // מקור יחיד: leads עם appointment_done=true
+  // תואם בדיוק לחישוב ההכנסות
+  var q=db.from('leads')
     .select('id,full_name,phone,doctor,appointment_date,appointment_time,deduction_amount,notes,source,secretary')
     .eq('appointment_done',true)
     .order('appointment_date',{ascending:false})
     .order('appointment_time',{ascending:false});
-  if(dateFrom)qLeads=qLeads.gte('appointment_date',dateFrom);
-  if(dateTo)qLeads=qLeads.lte('appointment_date',dateTo);
-  if(_logPeriod==='all')qLeads=qLeads.limit(1000);
+  if(dateFrom)q=q.gte('appointment_date',dateFrom);
+  if(dateTo)q=q.lte('appointment_date',dateTo);
+  if(_logPeriod==='all')q=q.limit(1000);
 
-  var qAppts=db.from('appointments')
-    .select('id,patient_name,patient_phone,doctor,date,time,deduction_amount,notes,lead_id')
-    .eq('status','done')
-    .order('date',{ascending:false});
-  if(dateFrom)qAppts=qAppts.gte('date',dateFrom);
-  if(dateTo)qAppts=qAppts.lte('date',dateTo);
-  if(_logPeriod==='all')qAppts=qAppts.limit(500);
-
-  var[resp,resp2]=await Promise.all([qLeads,qAppts]);
-  var leadIds=new Set((resp.data||[]).map(function(l){return l.id;}));
-
+  var resp=await q;
   var rows=(resp.data||[]).map(function(l){
+    // טיפולוג = source='טיפולוג'
+    // ידני = אושר על ידי מזכירה (כל מקור אחר)
     var isTipulog=(l.source==='טיפולוג');
     return {
       id:'lead_'+l.id,
@@ -5672,29 +5520,6 @@ async function loadAppointmentsLog(){
       _confirm_type:isTipulog?'tipulog':'manual',
       _lead_id:l.id
     };
-  });
-
-  // הוסף אישורים ידניים שאין להם lead
-  (resp2.data||[]).forEach(function(a){
-    if(a.lead_id&&leadIds.has(a.lead_id))return;
-    rows.push({
-      id:'appt_'+a.id,
-      patient_name:a.patient_name,
-      patient_phone:a.patient_phone,
-      doctor:a.doctor,
-      date:a.date,
-      time:a.time,
-      deduction_amount:a.deduction_amount,
-      notes:a.notes,
-      procedure_name:null,
-      _confirm_type:'manual',
-      _lead_id:null
-    });
-  });
-
-  rows.sort(function(a,b){
-    var d=new Date(b.date||0)-new Date(a.date||0);
-    return d!==0?d:(b.time||'').localeCompare(a.time||'');
   });
 
   // חיפוש
@@ -5929,7 +5754,7 @@ async function editAppointmentLog(apptId){
   overlay.appendChild(modal);document.body.appendChild(overlay);
 }
 
-async function showApptConfirmModal(appt, callback, snoozeCount){
+async function showApptConfirmModal(appt, callback){
   var old=document.getElementById('proc-pick-wrap');if(old)old.remove();
   var procsResp=await db.from('procedures').select('*').order('category').order('name');
   var procsData=procsResp.data||[];
@@ -6057,9 +5882,7 @@ async function showApptConfirmModal(appt, callback, snoozeCount){
   confirmBtn.textContent='✅ אשר וסגור';
   var snoozeBtn=document.createElement('button');
   snoozeBtn.style.cssText='flex:1;padding:10px;font-size:13px;background:#fff3e0;color:#e65100;border:2px solid #ff9800;border-radius:8px;cursor:pointer;font-weight:600';
-  var sc=snoozeCount||0;
-  snoozeBtn.textContent=sc===0?'⏰ הזכר לי בעוד 30 דק':sc===1?'⏰ עוד 30 דק (אחרון)':'⏰ עבור לממתינים';
-  if(sc>=2){snoozeBtn.style.background='#fce4ec';snoozeBtn.style.borderColor='#e53935';snoozeBtn.style.color='#b71c1c';}
+  snoozeBtn.textContent='⏰ 30 דק';
   var cancelBtn=document.createElement('button');cancelBtn.className='btn';
   cancelBtn.style.cssText='flex:1;padding:10px;font-size:13px;background:#f5f5f5;color:#757575;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer';
   cancelBtn.textContent='סגור';
@@ -6076,14 +5899,12 @@ async function showApptConfirmModal(appt, callback, snoozeCount){
         payload.patient_name=patName;payload.patient_phone=patPhone||'';payload.doctor=appt.doctor||'';
         payload.date=apptDate;payload.time=apptTime||'00:00';payload.lead_id=appt.id;
         await db.from('appointments').insert(payload);
-        await db.from('leads').update({appointment_done:true,appointment_confirmed:true,deduction_amount:price}).eq('id',appt.id);
+        await db.from('leads').update({appointment_done:true,appointment_confirmed:true}).eq('id',appt.id);
       } else {
         await db.from('appointments').update(payload).eq('id',appt.id);
-        if(appt.lead_id)await db.from('leads').update({appointment_done:true,appointment_confirmed:true,deduction_amount:price}).eq('id',appt.lead_id);
+        if(appt.lead_id)await db.from('leads').update({appointment_done:true,appointment_confirmed:true}).eq('id',appt.lead_id);
       }
       showToast('✅ תור אושר בהצלחה');
-      if(typeof loadAppointmentsLog==='function')loadAppointmentsLog();
-      if(typeof loadIncome==='function')loadIncome();
     } else {
       if(isLead){
         await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:notes||'בוטל דרך חלונית אישור'}).eq('id',appt.id);
@@ -6096,24 +5917,10 @@ async function showApptConfirmModal(appt, callback, snoozeCount){
     overlay.remove();
     if(callback)callback();
   };
-  // snooze counter
-  var snoozeKey=appt.id||appt.full_name||'unknown';
-  if(!_snoozeCount[snoozeKey])_snoozeCount[snoozeKey]=0;
-  
   snoozeBtn.onclick=function(){
-    _snoozeCount[snoozeKey]=(_snoozeCount[snoozeKey]||0)+1;
     overlay.remove();
-    var count=_snoozeCount[snoozeKey];
-    if(count>=2){
-      // אחרי 2 snoozes — העבר לרשימת ממתינים לאישור ואל תציג popup שוב
-      showToast('⏰ התור הועבר לרשימת ממתינים לאישור');
-      _snoozeCount[snoozeKey]=0;
-      // סמן שיופיע ברשימת ממתינים (לא appointment_done — עדיין ממתין)
-      return;
-    }
-    var label=count===1?'30 דקות':'30 דקות נוספות (סוף - אחר כך יעבור לממתינים)';
-    showToast('⏰ תזכורת נקבעה לעוד '+label);
-    setTimeout(function(){showApptConfirmModal(appt,callback,count);},30*60*1000);
+    setTimeout(function(){showApptConfirmModal(appt,callback);},30*60*1000);
+    showToast('⏰ תזכורת נקבעה לעוד 30 דקות');
   };
   btnRow.appendChild(confirmBtn);btnRow.appendChild(snoozeBtn);btnRow.appendChild(cancelBtn);
   modal.appendChild(btnRow);
