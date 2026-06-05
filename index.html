@@ -1,4 +1,4 @@
-<!-- build: 1780691827 -->
+<!-- build: 1780692300 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2874,7 +2874,8 @@ async function loadAppointments(){
   var allFutureLeads=leadsAll.filter(isFutureThisMonth);
 
   // --- חישובים ---
-  var myDoneCount=myConfirmedAppts.length;
+  // myDoneCount = כל תורים שבוצעו (appointment_done=true) של הרופא החודש
+  var myDoneCount=myDoneAppts.length;
   var myPendingCount=myPastUnconfirmed.length;
   // מוערך = מאומת + ממתינים×800 (עד היום)
   var myEstimatedRevenue=Math.round(myConfirmedRevenue+myPendingCount*800);
@@ -2882,15 +2883,17 @@ async function loadAppointments(){
   // צפי = מוערך + עתידיים×800 (עד סוף החודש)
   var myForecastRevenue=Math.round(myEstimatedRevenue+myFutureLeads.length*800);
   var allForecastRevenue=Math.round(allEstimatedRevenue+allFutureLeads.length*800);
-  // אחוז אימות: tipulog_synced=true → מאומת. אם כולם מאומתי טיפולוג = 100%
-  var myTipulogSynced=myConfirmedAppts.filter(function(a){return a.tipulog_synced===true;}).length;
-  var allTipulogSynced=allConfirmedAppts.filter(function(a){return a.tipulog_synced===true;}).length;
+  // אחוז אימות: כל תור עם tipulog_synced=true = מאומת. אם כולם בטיפולוג = 100%
+  var myTipulogSynced=myDoneAppts.filter(function(a){return a.tipulog_synced===true;}).length;
+  var allTipulogSynced=appts.filter(function(a){return a.tipulog_synced===true;}).length;
   var myPastTotal=myDoneCount+myPendingCount;
-  var accuracyPct=(myPastTotal>0&&myTipulogSynced===myDoneCount)?100:
+  // אם כל התורים שבוצעו אומתו בטיפולוג → 100%
+  var accuracyPct=(myPendingCount===0||myTipulogSynced>=myDoneCount)?100:
     myPastTotal>0?Math.round(myDoneCount/myPastTotal*100):100;
-  var allPastTotal=allConfirmedAppts.length+allPastUnconfirmed.length;
-  var allAccuracyPct=(allPastTotal>0&&allTipulogSynced===allConfirmedAppts.length)?100:
-    allPastTotal>0?Math.round(allConfirmedAppts.length/allPastTotal*100):100;
+  var allDoneCount=appts.filter(function(a){return a.appointment_done===true;}).length;
+  var allPastTotal=allDoneCount+allPastUnconfirmed.length;
+  var allAccuracyPct=(allPastUnconfirmed.length===0||allTipulogSynced>=allDoneCount)?100:
+    allPastTotal>0?Math.round(allDoneCount/allPastTotal*100):100;
   // שמור משתנים ישנים לתאימות
   var confirmedRevenue=myConfirmedRevenue;
   var allRevenue2=allConfirmedRevenue;
