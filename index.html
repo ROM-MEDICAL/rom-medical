@@ -1,4 +1,4 @@
-<!-- build: 1780695311 -->
+<!-- build: 1780695766 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2934,7 +2934,11 @@ async function loadAppointments(){
   // Build HTML
   var html='';
   
-  // Helper: build a stat cell
+  // For doctor-admin: show dual stats
+  var showDual=isDoctorAdmin;
+
+  // שם החודש הנוכחי
+  var mn=now.toLocaleDateString('he-IL',{month:'long',year:'numeric'});
   function statCell(val, label, bg, color){
     return '<div style="background:'+bg+';border-radius:8px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:700;color:'+color+'">'+val+'</div><div style="font-size:10px;color:#757575">'+label+'</div></div>';
   }
@@ -2953,12 +2957,6 @@ async function loadAppointments(){
     h+='</div>';
     return h;
   }
-
-  // For doctor-admin: show dual stats
-  var showDual=isDoctorAdmin;
-
-  // שם החודש הנוכחי
-  var mn=now.toLocaleDateString('he-IL',{month:'long',year:'numeric'});
 
   // ============================================================
   // 6 חלוניות — לפי תפקיד משתמש
