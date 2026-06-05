@@ -1,4 +1,4 @@
-<!-- build: 1780694036 -->
+<!-- build: 1780694421 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -927,7 +927,7 @@ async function loadDashboard(){
   window._myName=myName;
   window._isDoctorAdmin=isDoctorAdmin;
   window._isDoctorOnly=isDoctorOnly;
-  if((isDoctorOnly||isDoctorAdmin)&&(currentProfile.linked_doctor_name||currentProfile.display_name)){loadDoctorMonthlyPatients(currentProfile.linked_doctor_name||currentProfile.display_name||'');}
+  // מטופלים החודש — הוסר (מוצג במודול תורים ומעקב)
 }
 
 async function loadDoctorMonthlyPatients(docName){
