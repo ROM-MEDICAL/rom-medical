@@ -1,4 +1,4 @@
-<!-- build: 1780665016 -->
+<!-- build: 1780665204 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2637,6 +2637,7 @@ async function loadAppointments(){
   ]);
   var appts=r1.data||[];
   var allLeadsData=r2.data||[];
+  console.log('[DEBUG appts]',appts.length,'תורים החודש',appts.slice(0,3).map(function(a){return a.full_name+' '+a.appointment_date+' done='+a.appointment_done+' tipulog='+a.tipulog_synced;}));
   var procs=r3.data||[];
 
   // ===== רשימת תורים הממתינים לאישור (מאי 2026 והלאה) =====
@@ -2832,6 +2833,7 @@ async function loadAppointments(){
   var allConfirmedAppts=leadsAll.filter(isConfirmedAppt);
   var myConfirmedRevenue=0;
   myConfirmedAppts.forEach(function(a){myConfirmedRevenue+=Number(a.deduction_amount||0);});
+  console.log('[DEBUG confirmed]',myConfirmedAppts.length,'תורים מאומתים','rev='+myConfirmedRevenue,'appts='+appts.length,'myAppts='+myAppts.length);
   var allConfirmedRevenue=0;
   allConfirmedAppts.forEach(function(a){allConfirmedRevenue+=Number(a.deduction_amount||0);});
   // תיקון: myAppts ← myConfirmedAppts לתאימות
