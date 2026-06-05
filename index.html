@@ -1,4 +1,4 @@
-<!-- build: 1780692772 -->
+<!-- build: 1780694036 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -760,9 +760,6 @@ async function loadDashboard(){
   var isDoctorOnly=isDoctor&&!isAdmin&&!isSecretary;
   var showClinicWide=isAdmin&&!isDoctor||isSecretary;
 
-  var weekEnd=new Date();weekEnd.setDate(weekEnd.getDate()+(6-weekEnd.getDay()));
-  var weekEndStr=weekEnd.toISOString().slice(0,10);
-
   // Load tasks
   const{data:allTasksData}=await db.from('tasks').select('*').eq('status','open');
   var myTasks=(allTasksData||[]).filter(function(t){
@@ -772,6 +769,10 @@ async function loadDashboard(){
 
   // Load inventory
   const{data:inv}=await db.from('inventory').select('id,quantity,min_quantity,name');
+
+  var now2=new Date();
+  var thisMonthStart2=now2.getFullYear()+'-'+(now2.getMonth()+1<10?'0':'')+(now2.getMonth()+1)+'-01';
+  var thisMonthEnd2=new Date(now2.getFullYear(),now2.getMonth()+1,0).toISOString().slice(0,10);
 
   var todayAppts=[], weekAppts=[];
 
@@ -787,11 +788,11 @@ async function loadDashboard(){
         .eq('cancelled',false)
         .order('appointment_time'),
       db.from('leads').select('*')
-        .gte('appointment_date',td)
-        .lte('appointment_date',weekEndStr)
+        .gte('appointment_date',thisMonthStart2)
+        .lte('appointment_date',td)
+        .eq('appointment_done',true)
         .ilike('doctor','%'+docBase+'%')
-        .not('lead_status','eq','בוטל')
-        .eq('cancelled',false)
+        .neq('cancelled',true)
         .order('appointment_date').order('appointment_time')
     ]);
     todayAppts=r1.data||[];
@@ -805,10 +806,10 @@ async function loadDashboard(){
         .eq('cancelled',false)
         .order('appointment_time'),
       db.from('leads').select('*')
-        .gte('appointment_date',td)
-        .lte('appointment_date',weekEndStr)
-        .not('lead_status','eq','בוטל')
-        .eq('cancelled',false)
+        .gte('appointment_date',thisMonthStart2)
+        .lte('appointment_date',td)
+        .eq('appointment_done',true)
+        .neq('cancelled',true)
         .order('appointment_date').order('appointment_time')
     ]);
     todayAppts=r1.data||[];
@@ -825,7 +826,7 @@ async function loadDashboard(){
   var weekCard=document.getElementById('stat-card-leads');
   if(weekCard){
     var lbl=weekCard.querySelector('.stat-label');
-    if(lbl)lbl.textContent='תורים השבוע ▼';
+    if(lbl)lbl.textContent='תורים החודש ▼';
     weekCard.style.cursor='pointer';
     weekCard.onclick=function(){showWeekAppts();};
   }
