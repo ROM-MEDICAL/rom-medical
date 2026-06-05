@@ -1,4 +1,4 @@
-<!-- build: 1780665204 -->
+<!-- build: 1780665577 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2631,7 +2631,7 @@ async function loadAppointments(){
   var weekEndStr=new Date(now.getFullYear(),now.getMonth(),now.getDate()+(7-now.getDay())).toISOString().slice(0,10);
 
   var[r1,r2,r3]=await Promise.all([
-    db.from('leads').select('id,full_name,phone,doctor,appointment_date,appointment_time,deduction_amount,appointment_done,appointment_confirmed,tipulog_synced,lead_status,cancelled,source').eq('appointment_done',true).gte('appointment_date',thisMonthStart).eq('cancelled',false).order('appointment_date',{ascending:false}),
+    db.from('leads').select('id,full_name,phone,doctor,appointment_date,appointment_time,deduction_amount,appointment_done,appointment_confirmed,tipulog_synced,lead_status,cancelled,source').eq('appointment_done',true).gte('appointment_date',thisMonthStart).neq('cancelled',true).order('appointment_date',{ascending:false}),
     db.from('leads').select('*').order('original_date',{ascending:false}).range(0,29999),
     db.from('procedures').select('*')
   ]);
@@ -2827,10 +2827,16 @@ async function loadAppointments(){
       &&l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<=todayStr
       &&!l.cancelled&&l.lead_status!=='בוטל';
   }
-  var myConfirmedAppts=(isDoctorOnly||isDoctorAdmin)?leads.filter(function(l){
-    return isConfirmedAppt(l)&&docFirst&&(l.doctor||'').includes(docFirst);
-  }):leads.filter(isConfirmedAppt);
-  var allConfirmedAppts=leadsAll.filter(isConfirmedAppt);
+  // myConfirmedAppts מ-appts (כבר מסונן appointment_done=true + החודש)
+  var myConfirmedAppts=(isDoctorOnly||isDoctorAdmin)?appts.filter(function(l){
+    return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<=todayStr
+      &&!l.cancelled&&docFirst&&(l.doctor||'').includes(docFirst);
+  }):appts.filter(function(l){
+    return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<=todayStr&&!l.cancelled;
+  });
+  var allConfirmedAppts=appts.filter(function(l){
+    return l.appointment_date&&l.appointment_date>=thisMonthStart&&l.appointment_date<=todayStr&&!l.cancelled;
+  });
   var myConfirmedRevenue=0;
   myConfirmedAppts.forEach(function(a){myConfirmedRevenue+=Number(a.deduction_amount||0);});
   console.log('[DEBUG confirmed]',myConfirmedAppts.length,'תורים מאומתים','rev='+myConfirmedRevenue,'appts='+appts.length,'myAppts='+myAppts.length);
