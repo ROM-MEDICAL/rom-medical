@@ -1,4 +1,4 @@
-<!-- build: 1780665835 -->
+<!-- build: 1780666218 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2735,6 +2735,7 @@ async function loadAppointments(){
   // Get doctor name from linked_doctor_name or display_name
   var myDoctorName=myUser?(myUser.linked_doctor_name||currentProfile.display_name||currentProfile.full_name||''):'';
   var docFirst=myDoctorName.replace(/ד"ר /g,'').split('(')[0].trim().split(' ')[0];
+  console.log('[DOCTOR] myDoctorName='+myDoctorName+' docFirst='+docFirst+' isDoctorAdmin='+isDoctorAdmin+' isDoctorOnly='+isDoctorOnly+' isSecretary='+isSecretary);
   
   function matchesMyDoctor(l){
     if(!docFirst||docFirst.length<2)return false;
