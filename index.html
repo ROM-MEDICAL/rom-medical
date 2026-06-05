@@ -1,4 +1,4 @@
-<!-- build: 1780666218 -->
+<!-- build: 1780666552 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -4421,7 +4421,7 @@ async function handleTipulogUpload(input){
         if(!s)return '';
         return s.trim()
           .replace(/[\u05B0-\u05C7]/g,'') // הסר ניקוד
-          .replace(/['"״`]/g,'')
+          .replace(/['"\u05f4\u0060]/g,'')
           .replace(/\s+/g,' ')
           .toLowerCase();
       }
