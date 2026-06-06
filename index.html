@@ -1,4 +1,4 @@
-<!-- build: 1780696412 -->
+<!-- build: 1780741645 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2959,197 +2959,133 @@ async function loadAppointments(){
   }
 
   // ============================================================
-  // 6 חלוניות — לפי תפקיד משתמש
-  // סדר עדיפות: רופא > מזכירה > אדמין
+  // חלוניות לפי תפקיד — תורים ומעקב
+  // רופא > מזכירה > אדמין
   // ============================================================
 
-  // --- טעינת משימות (נדרש לחלוניות) ---
-  var myTasksData=[];
-  try{
-    var tResp=await db.from('tasks').select('*').eq('status','open');
-    myTasksData=(tResp.data||[]).filter(function(t){
-      var ids=[];try{ids=t.assigned_users?JSON.parse(t.assigned_users):[t.assigned_user_id];}catch(e){}
-      return t.assigned_user_id===currentUser.id||ids.includes(currentUser.id);
+  var mn=now.toLocaleDateString('he-IL',{month:'long',year:'numeric'});
+  var todayApptsList=leadsAll.filter(function(l){
+    return l.appointment_date===todayStr&&!l.cancelled&&l.lead_status==='נקבע תור';
+  }).sort(function(a,b){return (a.appointment_time||'').localeCompare(b.appointment_time||'');});
+
+  // Helper: כרטיס מספר
+  function numCard2(title,val,color){
+    return '<div class="card" style="padding:14px">'
+      +'<div style="font-size:11px;font-weight:700;color:#4f46e5;margin-bottom:10px;border-bottom:1px solid #e0e0e0;padding-bottom:5px">'+title+'</div>'
+      +'<div style="text-align:center;font-size:32px;font-weight:700;color:'+color+';padding:6px">'+val+'</div>'
+      +'</div>';
+  }
+  // Helper: כרטיס רשימה
+  function listCard2(title,items,emptyMsg,renderFn){
+    var h='<div class="card" style="padding:14px">'
+      +'<div style="font-size:11px;font-weight:700;color:#4f46e5;margin-bottom:8px;border-bottom:1px solid #e0e0e0;padding-bottom:5px">'+title+'</div>';
+    if(!items||!items.length){
+      h+='<div style="color:#9e9e9e;font-size:12px;text-align:center;padding:10px">'+emptyMsg+'</div>';
+    }else{
+      h+='<div style="max-height:200px;overflow-y:auto">';
+      items.forEach(function(item){h+=renderFn(item);});
+      h+='</div>';
+    }
+    return h+'</div>';
+  }
+  function apptRow(l){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px">'
+      +'<span style="font-weight:600">'+l.full_name+'</span>'
+      +'<span style="color:#555;font-size:11px">'+(l.appointment_time?String(l.appointment_time).slice(0,5):'—')
+      +' | '+(l.doctor||'').replace(/ד"ר /g,'').split('(')[0].trim()+'</span></div>';
+  }
+
+  html+='<div style="display:grid;gap:12px;margin-bottom:12px">';
+
+  if(isDoctorOnly||isDoctorAdmin){
+    // ======= רופא =======
+    // נתונים
+    var myPeniyas=leadsAll.filter(function(l){
+      return (l.doctor||'').includes(docFirst||'')
+        && l.original_date && l.original_date>=thisMonthStart
+        && l.original_date<=todayStr;
     });
-  }catch(e){myTasksData=[];}
-  var myTasks=myTasksData;
-  var urgentTasks=myTasks.filter(function(t){return t.priority==='high';});
-
-  // --- טעינת מלאי (נדרש לאדמין) ---
-  var inv=[];
-  try{
-    var invResp=await db.from('inventory').select('id,quantity,min_quantity,name');
-    inv=invResp.data||[];
-  }catch(e){inv=[];}
-
-  // --- נתונים משותפים ---
-  // תורים שבוצעו ואומתו החודש (appointment_done=true, תאריך חלף — מ-1 לחודש בלבד)
-  var myDoneThisMonth = appts.filter(function(a){
-    return (a.doctor||'').includes(docFirst||'')
-      && a.appointment_date >= thisMonthStart
-      && a.appointment_date <= todayStr
-      && a.appointment_date.slice(0,7) === thisMonthStart.slice(0,7);
-  });
-  var allDoneThisMonth = appts.filter(function(a){
-    return a.appointment_date >= thisMonthStart
-      && a.appointment_date <= todayStr
-      && a.appointment_date.slice(0,7) === thisMonthStart.slice(0,7);
-  });
-
-  // תורים עתידיים החודש
-  var myFutureThisMonth = leads.filter(function(l){
-    return l.appointment_date > todayStr
-      && l.appointment_date <= thisMonthEnd
-      && l.lead_status === 'נקבע תור'
-      && !l.cancelled && !l.appointment_done;
-  });
-  var allFutureThisMonth = leadsAll.filter(function(l){
-    return l.appointment_date > todayStr
-      && l.appointment_date <= thisMonthEnd
-      && l.lead_status === 'נקבע תור'
-      && !l.cancelled && !l.appointment_done;
-  });
-
-  // משימות דחופות
-  var urgentTasks = myTasks.filter(function(t){ return t.priority==='high'; });
-
-  // --- Helper: כרטיס מספר גדול ---
-  function numCard(title, myVal, allVal, myColor, allColor, showAll){
-    var h = '<div class="card" style="padding:14px">';
-    h += '<div style="font-size:11px;font-weight:700;color:#4f46e5;margin-bottom:10px;border-bottom:1px solid #e0e0e0;padding-bottom:5px">'+title+'</div>';
-    if(showAll){
-      h += '<div style="display:grid;grid-template-columns:1fr 1px 1fr;align-items:center">';
-      h += '<div style="text-align:center;padding:6px"><div style="font-size:10px;color:#6a1b9a;font-weight:600;margin-bottom:3px">👤 שלי</div>';
-      h += '<div style="font-size:28px;font-weight:700;color:'+myColor+'">'+myVal+'</div></div>';
-      h += '<div style="background:#e0e0e0;height:44px;width:1px;margin:auto"></div>';
-      h += '<div style="text-align:center;padding:6px"><div style="font-size:10px;color:#1565c0;font-weight:600;margin-bottom:3px">🏥 מרפאה</div>';
-      h += '<div style="font-size:28px;font-weight:700;color:'+allColor+'">'+allVal+'</div></div>';
-      h += '</div>';
-    } else {
-      h += '<div style="text-align:center;padding:6px"><div style="font-size:30px;font-weight:700;color:'+myColor+'">'+myVal+'</div></div>';
-    }
-    h += '</div>';
-    return h;
-  }
-
-  // --- Helper: כרטיס רשימה ---
-  function listCard(title, items, emptyMsg, renderFn){
-    var h = '<div class="card" style="padding:14px">';
-    h += '<div style="font-size:11px;font-weight:700;color:#4f46e5;margin-bottom:8px;border-bottom:1px solid #e0e0e0;padding-bottom:5px">'+title+'</div>';
-    if(!items || !items.length){
-      h += '<div style="color:#9e9e9e;font-size:12px;text-align:center;padding:10px">'+emptyMsg+'</div>';
-    } else {
-      h += '<div style="max-height:180px;overflow-y:auto">';
-      items.forEach(function(item){ h += renderFn(item); });
-      h += '</div>';
-    }
-    h += '</div>';
-    return h;
-  }
-
-  html += '<div style="display:grid;gap:12px;margin-bottom:12px">';
-
-  if(isDoctorOnly || isDoctorAdmin){
-    // ========== תצוגת רופא ==========
-
-    // שורה 1: לידים שלי החודש | תורים שביצעתי החודש
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
-    html += numCard('📋 פניות החודש אליי — '+mn,
-      myStats.leadsThisMonth, allStats.leadsThisMonth,
-      '#1565c0', '#4f46e5', isDoctorAdmin);
-    html += numCard('✅ תורים שביצעתי — '+mn,
-      myDoneThisMonth.length, allDoneThisMonth.length,
-      '#2e7d32', '#1b5e20', isDoctorAdmin);
-    html += '</div>';
-
-    // שורה 2: יום מרפאה קרוב | תורים עתידיים החודש
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
-
-    // יום מרפאה קרוב — התור הבא שלי
-    var nextAppts = leadsAll.filter(function(l){
-      return l.appointment_date > todayStr
-        && (l.doctor||'').includes(docFirst||'')
-        && l.lead_status === 'נקבע תור'
-        && !l.cancelled;
+    var myDoneMonth=appts.filter(function(a){
+      return (a.doctor||'').includes(docFirst||'')
+        && a.appointment_date>=thisMonthStart
+        && a.appointment_date<=todayStr
+        && a.appointment_date.slice(0,7)===thisMonthStart.slice(0,7);
+    });
+    var nextAppts=leadsAll.filter(function(l){
+      return l.appointment_date>todayStr
+        &&(l.doctor||'').includes(docFirst||'')
+        &&l.lead_status==='נקבע תור'&&!l.cancelled&&!l.appointment_done;
     }).sort(function(a,b){
-      return (a.appointment_date+' '+(a.appointment_time||'')).localeCompare(b.appointment_date+' '+(b.appointment_time||''));
+      return(a.appointment_date+' '+(a.appointment_time||'')).localeCompare(b.appointment_date+' '+(b.appointment_time||''));
     });
-    // מצא את התאריך הקרוב ביותר
-    var nextDate = nextAppts.length ? nextAppts[0].appointment_date : null;
-    var nextDayAppts = nextDate ? nextAppts.filter(function(a){return a.appointment_date===nextDate;}) : [];
-    var nextDayStr = nextDate ? new Date(nextDate).toLocaleDateString('he-IL',{weekday:'short',day:'numeric',month:'numeric'}) : null;
+    var nextDate=nextAppts.length?nextAppts[0].appointment_date:null;
+    var nextDayAppts=nextDate?nextAppts.filter(function(a){return a.appointment_date===nextDate;}):[];
+    var nextDayStr=nextDate?new Date(nextDate).toLocaleDateString('he-IL',{weekday:'long',day:'numeric',month:'numeric'}):'';
 
-    html += listCard('📅 יום מרפאה קרוב'+(nextDayStr?' — '+nextDayStr:''),
-      nextDayAppts, 'אין תורים קרובים',
-      function(l){
-        return '<div style="display:flex;justify-content:space-between;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px">'
-          +'<span style="font-weight:600">'+l.full_name+'</span>'
-          +'<span style="color:#555">'+(l.appointment_time?String(l.appointment_time).slice(0,5):'—')+'</span>'
-          +'</div>';
-      });
+    // שורה 1
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+    html+=numCard2('📋 פניות החודש אליי — '+mn, myPeniyas.length,'#1565c0');
+    html+=numCard2('✅ תורים שביצעתי — '+mn, myDoneMonth.length,'#2e7d32');
+    html+='</div>';
 
-    html += numCard('🗓️ תורים עתידיים — '+mn,
-      myFutureThisMonth.length, allFutureThisMonth.length,
-      '#e65100', '#bf360c', isDoctorAdmin);
-    html += '</div>';
+    // שורה 2 — יום מרפאה קרוב
+    html+=listCard2(
+      '📅 יום מרפאה קרוב'+(nextDayStr?' — '+nextDayStr:''),
+      nextDayAppts,'אין תורים עתידיים',apptRow);
 
-    // (משימות ומלאי — בלוח הבקרה בלבד)
-
-  } else if(isSecretary && !isAdmin){
-    // ========== תצוגת מזכירה ==========
-    var mySecName = currentProfile.display_name || myName || '';
-
-    // תורים שנרשמו על שמה ואומתו החודש
-    var mySecDone = leadsAll.filter(function(l){
-      return l.appointment_done === true
-        && l.appointment_date >= thisMonthStart
-        && l.appointment_date <= todayStr
-        && (l.secretary||'').includes(mySecName);
+  }else if(isSecretary&&!isAdmin){
+    // ======= מזכירה =======
+    var mySecName=currentProfile.display_name||myName||'';
+    var myLeadsMonth=leadsAll.filter(function(l){
+      return (l.secretary||'')===mySecName
+        &&l.original_date&&l.original_date>=thisMonthStart
+        &&l.original_date<=todayStr;
+    });
+    var mySecDoneMonth=appts.filter(function(a){
+      return (a.secretary||'')===mySecName
+        &&a.appointment_date>=thisMonthStart
+        &&a.appointment_date<=todayStr
+        &&a.appointment_date.slice(0,7)===thisMonthStart.slice(0,7);
+    });
+    var mySecFuture=leadsAll.filter(function(l){
+      return (l.secretary||'')===mySecName
+        &&l.appointment_date>todayStr
+        &&l.appointment_date<=thisMonthEnd
+        &&l.lead_status==='נקבע תור'&&!l.cancelled&&!l.appointment_done;
     });
 
-    html += numCard('✅ תורים שקבעתי — '+mn, mySecDone.length, '', '#2e7d32', '', false);
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+    html+=numCard2('📋 לידים שטיפלתי — '+mn, myLeadsMonth.length,'#1565c0');
+    html+=numCard2('✅ תורים שקבעתי — '+mn, mySecDoneMonth.length,'#2e7d32');
+    html+='</div>';
+    html+=listCard2('🗓️ תורים היום — כל המרפאה', todayApptsList,'אין תורים היום',apptRow);
+    html+=numCard2('🗓️ תורים עתידיים שלי — '+mn, mySecFuture.length,'#e65100');
 
-    // תורים היום
-    html += listCard('🗓️ תורים היום — כל המרפאה',
-      leadsAll.filter(function(l){return l.appointment_date===todayStr&&!l.cancelled;})
-        .sort(function(a,b){return (a.appointment_time||'').localeCompare(b.appointment_time||'');}),
-      'אין תורים היום',
-      function(l){
-        return '<div style="display:flex;justify-content:space-between;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px">'
-          +'<span style="font-weight:600">'+l.full_name+'</span>'
-          +'<span style="color:#555;font-size:11px">'+(l.appointment_time?String(l.appointment_time).slice(0,5):'—')
-          +' | '+(l.doctor||'').split('(')[0].trim()+'</span></div>';
-      });
+  }else{
+    // ======= אדמין =======
+    var allLeadsMonth=leadsAll.filter(function(l){
+      return l.original_date&&l.original_date>=thisMonthStart&&l.original_date<=todayStr;
+    });
+    var allDoneMonth=appts.filter(function(a){
+      return a.appointment_date>=thisMonthStart
+        &&a.appointment_date<=todayStr
+        &&a.appointment_date.slice(0,7)===thisMonthStart.slice(0,7);
+    });
+    var allFutureMonth=leadsAll.filter(function(l){
+      return l.appointment_date>todayStr&&l.appointment_date<=thisMonthEnd
+        &&l.lead_status==='נקבע תור'&&!l.cancelled&&!l.appointment_done;
+    });
 
-    // תורים עתידיים
-    html += numCard('🗓️ תורים מתוכננים — '+mn, allFutureThisMonth.length, '', '#1565c0', '', false);
-
-  } else {
-    // ========== תצוגת אדמין ==========
-
-    // כלל התורים שנרשמו ואומתו החודש
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
-    html += numCard('✅ תורים שבוצעו — '+mn, allDoneThisMonth.length, '', '#2e7d32', '', false);
-    html += numCard('📋 לידים החודש — '+mn, allStats.leadsThisMonth, '', '#1565c0', '', false);
-    html += '</div>';
-
-    // תורים היום + משימות
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
-    html += listCard('🗓️ תורים היום — כל המרפאה',
-      leadsAll.filter(function(l){return l.appointment_date===todayStr&&!l.cancelled;})
-        .sort(function(a,b){return (a.appointment_time||'').localeCompare(b.appointment_time||'');}),
-      'אין תורים היום',
-      function(l){
-        return '<div style="display:flex;justify-content:space-between;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px">'
-          +'<span style="font-weight:600">'+l.full_name+'</span>'
-          +'<span style="color:#555;font-size:11px">'+(l.appointment_time?String(l.appointment_time).slice(0,5):'—')
-          +' | '+(l.doctor||'').split('(')[0].trim()+'</span></div>';
-      });
-    // תורים עתידיים
-    html += numCard('🗓️ תורים מתוכננים — '+mn, allFutureThisMonth.length, '', '#1565c0', '', false);
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+    html+=numCard2('📋 לידים החודש — '+mn, allLeadsMonth.length,'#1565c0');
+    html+=numCard2('✅ תורים שבוצעו — '+mn, allDoneMonth.length,'#2e7d32');
+    html+='</div>';
+    html+=listCard2('🗓️ תורים היום — כל המרפאה', todayApptsList,'אין תורים היום',apptRow);
+    html+=numCard2('🗓️ תורים עתידיים החודש', allFutureMonth.length,'#e65100');
   }
 
-  // (מלאי נמוך — בלוח הבקרה בלבד)
+  html+='</div>'; // סגירת grid
+
 
   html += '</div>'; // סגירת grid ראשי
 
