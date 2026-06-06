@@ -1,4 +1,4 @@
-<!-- build: 1780777034 -->
+<!-- build: 1780777177 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1967,10 +1967,15 @@ async function onPhoneInput(val){
   console.log('[PHONE] matches='+matches.length+' clean.length='+clean.length);
   // כשהמספר שלם ויש התאמה מדויקת — הצג היסטוריית מטופל
   if(clean.length>=10){
-    var exactMatch=searchLeads.find(function(l){
-      return (l.phone||'').replace(/[-\s]/g,'')===clean;
+    // השתמש ב-matches שכבר חושבו (מה-DB או מ-allLeads)
+    var exactMatch=matches.find(function(l){
+      var lp=(l.phone||'').replace(/[^0-9]/g,'').slice(-10);
+      var cp=clean.replace(/[^0-9]/g,'').slice(-10);
+      console.log('[EXACT] lp='+lp+' cp='+cp+' eq='+(lp===cp));
+      return lp===cp;
     });
     if(exactMatch){
+      console.log('[PHONE] exactMatch found: '+exactMatch.full_name);
       qs('phone-suggest').style.display='none';
       showPatientHistory(exactMatch);
     }
