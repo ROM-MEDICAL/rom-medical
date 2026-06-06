@@ -1,4 +1,4 @@
-<!-- build: 1780755108 -->
+<!-- build: 1780755549 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -928,6 +928,169 @@ async function loadDashboard(){
   window._isDoctorAdmin=isDoctorAdmin;
   window._isDoctorOnly=isDoctorOnly;
   // מטופלים החודש — הוסר (מוצג במודול תורים ומעקב)
+
+  // ===== קטעים נוספים לפי תפקיד =====
+  var pad2=function(n){return n<10?'0'+n:String(n);};
+  var now3=new Date();
+  var todayStr3=now3.getFullYear()+'-'+pad2(now3.getMonth()+1)+'-'+pad2(now3.getDate());
+  var ms3=now3.getFullYear()+'-'+pad2(now3.getMonth()+1)+'-01';
+  var tomorrow3=new Date(now3); tomorrow3.setDate(tomorrow3.getDate()+1);
+  var tomorrowStr3=tomorrow3.getFullYear()+'-'+pad2(tomorrow3.getMonth()+1)+'-'+pad2(tomorrow3.getDate());
+
+  // --- רופא: הכנסה מאומתת החודש ---
+  if(isDoctorOnly||isDoctorAdmin){
+    var docBase2=(currentProfile.linked_doctor_name||myName||'').replace(/ד"ר /g,'').split('(')[0].trim();
+    var revEl=document.getElementById('dash-doctor-revenue');
+    if(!revEl){
+      revEl=document.createElement('div');revEl.id='dash-doctor-revenue';
+      revEl.style.cssText='margin-top:12px';
+      var dashMain=qs('dash-appts');
+      if(dashMain&&dashMain.parentNode){dashMain.parentNode.insertBefore(revEl,dashMain.nextSibling);}
+    }
+    db.from('leads').select('deduction_amount,appointment_date')
+      .eq('appointment_done',true)
+      .gte('appointment_date',ms3)
+      .lte('appointment_date',todayStr3)
+      .ilike('doctor','%'+docBase2+'%')
+      .neq('cancelled',true)
+      .then(function(res){
+        var rows=res.data||[];
+        var rev=rows.reduce(function(s,r){return s+Number(r.deduction_amount||0);},0);
+        revEl.innerHTML='<div class="card" style="padding:14px;background:linear-gradient(135deg,#e8f5e9,#f1f8e9)">'
+          +'<div style="font-size:11px;font-weight:700;color:#2e7d32;margin-bottom:6px">💰 הכנסה מאומתת — '+now3.toLocaleDateString('he-IL',{month:'long',year:'numeric'})+'</div>'
+          +'<div style="font-size:26px;font-weight:700;color:#1b5e20">₪'+rev.toLocaleString('he-IL')+'</div>'
+          +'<div style="font-size:11px;color:#4caf50;margin-top:3px">'+rows.length+' תורים מאומתים</div>'
+          +'</div>';
+      });
+  }
+
+  // --- מזכירה: לידים הדורשים המשך טיפול + תורים למחר ---
+  if((isSecretary||isAdmin)&&!isDoctorOnly){
+    var secExtra=document.getElementById('dash-sec-extra');
+    if(!secExtra){
+      secExtra=document.createElement('div');secExtra.id='dash-sec-extra';
+      secExtra.style.cssText='margin-top:12px;display:grid;gap:12px';
+      var dashTasks=qs('dash-tasks');
+      if(dashTasks&&dashTasks.parentNode){dashTasks.parentNode.appendChild(secExtra);}
+    }
+
+    // לידים הדורשים המשך טיפול
+    db.from('leads').select('full_name,phone,return_date,secretary,notes')
+      .eq('lead_status','נדרש המשך טיפול')
+      .lte('return_date',todayStr3)
+      .neq('cancelled',true)
+      .order('return_date')
+      .limit(10)
+      .then(function(res){
+        var rows=res.data||[];
+        // מסנן לפי מזכירה אם לא admin
+        if(!isAdmin){rows=rows.filter(function(l){return (l.secretary||'')===myName;});}
+        var card='<div class="card" style="padding:14px">';
+        card+='<div style="font-size:11px;font-weight:700;color:#e65100;margin-bottom:8px;border-bottom:1px solid #ffe0b2;padding-bottom:5px">🔔 דורשים המשך טיפול ('+rows.length+')</div>';
+        if(!rows.length){card+='<div style="color:#9e9e9e;font-size:12px;text-align:center;padding:8px">אין לידים הדורשים טיפול כעת</div>';}
+        else{
+          card+='<div style="max-height:160px;overflow-y:auto">';
+          rows.forEach(function(l){
+            card+='<div style="display:flex;justify-content:space-between;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px;cursor:pointer" onclick="showPage(\'leads\',null)">';
+            card+='<span style="font-weight:600">'+l.full_name+'</span>';
+            card+='<span style="color:#e65100;font-size:11px">'+( l.return_date?new Date(l.return_date).toLocaleDateString('he-IL'):'')+ '</span></div>';
+          });
+          card+='</div>';
+        }
+        card+='</div>';
+        var followEl=document.getElementById('dash-followup');
+        if(!followEl){followEl=document.createElement('div');followEl.id='dash-followup';secExtra.appendChild(followEl);}
+        followEl.innerHTML=card;
+      });
+
+    // תורים למחר — לאשר הגעה
+    db.from('leads').select('full_name,phone,appointment_time,doctor,lead_status')
+      .eq('appointment_date',tomorrowStr3)
+      .eq('lead_status','נקבע תור')
+      .neq('cancelled',true)
+      .order('appointment_time')
+      .then(function(res){
+        var rows=res.data||[];
+        var card='<div class="card" style="padding:14px">';
+        card+='<div style="font-size:11px;font-weight:700;color:#1565c0;margin-bottom:8px;border-bottom:1px solid #bbdefb;padding-bottom:5px">📞 תורים מחר — לאשר הגעה ('+rows.length+')</div>';
+        if(!rows.length){card+='<div style="color:#9e9e9e;font-size:12px;text-align:center;padding:8px">אין תורים מחר</div>';}
+        else{
+          card+='<div style="max-height:160px;overflow-y:auto">';
+          rows.forEach(function(l){
+            card+='<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px">';
+            card+='<div><span style="font-weight:600">'+l.full_name+'</span>';
+            card+='<span style="color:#555;font-size:11px;margin-right:8px">'+( l.appointment_time?String(l.appointment_time).slice(0,5):'')+ '</span></div>';
+            card+='<a href="tel:'+( l.phone||'').replace(/-/g,'')+ '" style="background:#e3f2fd;border-radius:12px;padding:2px 8px;font-size:11px;color:#1565c0;text-decoration:none">📞 '+( l.phone||'')+ '</a></div>';
+          });
+          card+='</div>';
+        }
+        card+='</div>';
+        var tomEl=document.getElementById('dash-tomorrow');
+        if(!tomEl){tomEl=document.createElement('div');tomEl.id='dash-tomorrow';secExtra.appendChild(tomEl);}
+        tomEl.innerHTML=card;
+      });
+  }
+
+  // --- Admin: סיכום הכנסות מרפאה + רופאים עם תורים עתידיים ---
+  if(isAdmin&&!isDoctorOnly){
+    var adminExtra=document.getElementById('dash-admin-extra');
+    if(!adminExtra){
+      adminExtra=document.createElement('div');adminExtra.id='dash-admin-extra';
+      adminExtra.style.cssText='margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px';
+      var dashTasks2=qs('dash-tasks');
+      if(dashTasks2&&dashTasks2.parentNode){dashTasks2.parentNode.appendChild(adminExtra);}
+    }
+
+    // הכנסות מרפאה החודש
+    db.from('leads').select('deduction_amount')
+      .eq('appointment_done',true)
+      .gte('appointment_date',ms3)
+      .lte('appointment_date',todayStr3)
+      .neq('cancelled',true)
+      .then(function(res){
+        var rows=res.data||[];
+        var rev=rows.reduce(function(s,r){return s+Number(r.deduction_amount||0);},0);
+        var card='<div class="card" style="padding:14px;background:linear-gradient(135deg,#e8f5e9,#f1f8e9)">';
+        card+='<div style="font-size:11px;font-weight:700;color:#2e7d32;margin-bottom:6px">💰 הכנסות מרפאה — '+now3.toLocaleDateString('he-IL',{month:'long',year:'numeric'})+'</div>';
+        card+='<div style="font-size:26px;font-weight:700;color:#1b5e20">₪'+rev.toLocaleString('he-IL')+'</div>';
+        card+='<div style="font-size:11px;color:#4caf50;margin-top:3px">'+rows.length+' תורים מאומתים</div>';
+        card+='</div>';
+        var revEl2=document.getElementById('dash-admin-rev');
+        if(!revEl2){revEl2=document.createElement('div');revEl2.id='dash-admin-rev';adminExtra.appendChild(revEl2);}
+        revEl2.innerHTML=card;
+      });
+
+    // רופאים עם תורים עתידיים השבוע
+    var weekEnd3=new Date(now3);weekEnd3.setDate(weekEnd3.getDate()+7);
+    var weekEndStr3=weekEnd3.getFullYear()+'-'+pad2(weekEnd3.getMonth()+1)+'-'+pad2(weekEnd3.getDate());
+    db.from('leads').select('doctor,appointment_date')
+      .gt('appointment_date',todayStr3)
+      .lte('appointment_date',weekEndStr3)
+      .eq('lead_status','נקבע תור')
+      .neq('cancelled',true)
+      .then(function(res){
+        var rows=res.data||[];
+        var byDoc={};
+        rows.forEach(function(l){var d=l.doctor||'ללא שיוך';byDoc[d]=(byDoc[d]||0)+1;});
+        var sorted=Object.entries(byDoc).sort(function(a,b){return b[1]-a[1];});
+        var card='<div class="card" style="padding:14px">';
+        card+='<div style="font-size:11px;font-weight:700;color:#4f46e5;margin-bottom:8px;border-bottom:1px solid #e0e0e0;padding-bottom:5px">📅 תורים עתידיים 7 ימים הבאים</div>';
+        if(!sorted.length){card+='<div style="color:#9e9e9e;font-size:12px;text-align:center;padding:8px">אין תורים עתידיים</div>';}
+        else{
+          card+='<div style="max-height:160px;overflow-y:auto">';
+          sorted.forEach(function(e){
+            var docShort=e[0].replace(/ד"ר /,'').split('(')[0].trim();
+            card+='<div style="display:flex;justify-content:space-between;padding:4px;border-bottom:1px solid #f5f5f5;font-size:12px">';
+            card+='<span>'+docShort+'</span><span style="font-weight:700;color:#4f46e5">'+e[1]+'</span></div>';
+          });
+          card+='</div>';
+        }
+        card+='</div>';
+        var futEl=document.getElementById('dash-admin-future');
+        if(!futEl){futEl=document.createElement('div');futEl.id='dash-admin-future';adminExtra.appendChild(futEl);}
+        futEl.innerHTML=card;
+      });
+  }
 }
 
 async function loadDoctorMonthlyPatients(docName){
