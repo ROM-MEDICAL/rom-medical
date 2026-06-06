@@ -1,4 +1,4 @@
-<!-- build: 1780776683 -->
+<!-- build: 1780776865 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1940,6 +1940,7 @@ function toggleCancel(){}
 
 async function onPhoneInput(val){
   var clean=val.replace(/[-\s]/g,'');
+  console.log('[PHONE] val='+val+' clean='+clean+' len='+clean.length+' allLeads='+allLeads.length);
   if(qs('lf-id').value){qs('phone-suggest').style.display='none';return;}
   if(clean.length<7){qs('phone-suggest').style.display='none';return;}
 
@@ -1963,6 +1964,7 @@ async function onPhoneInput(val){
     }).join('');
   } else qs('phone-suggest').style.display='none';
 
+  console.log('[PHONE] matches='+matches.length+' clean.length='+clean.length);
   // כשהמספר שלם ויש התאמה מדויקת — הצג היסטוריית מטופל
   if(clean.length>=10){
     var exactMatch=searchLeads.find(function(l){
