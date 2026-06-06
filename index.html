@@ -1,4 +1,4 @@
-<!-- build: 1780778106 -->
+<!-- build: 1780778533 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2012,11 +2012,41 @@ async function showPatientHistory(lead){
   panel.id='patient-history-panel';
   panel.style.cssText='background:#e8f5e9;border:2px solid #43a047;border-radius:10px;padding:14px;margin-top:10px;font-size:12px';
 
-  // כותרת
+  // מצא שמות שונים עם אותו טלפון
+  var uniqueNames=[...new Set(history.map(function(l){return l.full_name||'';}).filter(Boolean))];
+  var lastDoctor=history.find(function(l){return l.appointment_done&&l.doctor;});
+  var lastDocName=lastDoctor?(lastDoctor.doctor||''):'';
+
+  // כותרת + סגירה
   var title=document.createElement('div');
-  title.style.cssText='font-weight:700;color:#1b5e20;margin-bottom:10px;font-size:13px;display:flex;justify-content:space-between';
+  title.style.cssText='font-weight:700;color:#1b5e20;margin-bottom:10px;font-size:13px;display:flex;justify-content:space-between;align-items:center';
   title.innerHTML='✅ מטופל קיים — '+lead.full_name+'<button onclick="document.getElementById(&quot;patient-history-panel&quot;).remove()" style="background:none;border:none;cursor:pointer;color:#555;font-size:14px">✕</button>';
   panel.appendChild(title);
+
+  // אם יש מספר מטופלים באותו טלפון — הצג לבחירה
+  if(uniqueNames.length>1){
+    var nameTitle=document.createElement('div');
+    nameTitle.style.cssText='font-size:11px;font-weight:600;color:#1b5e20;margin-bottom:6px';
+    nameTitle.textContent='מספר מטופלים עם אותו טלפון — בחר:';
+    panel.appendChild(nameTitle);
+    var nameList=document.createElement('div');
+    nameList.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px';
+    uniqueNames.forEach(function(name){
+      var btn=document.createElement('button');
+      btn.style.cssText='background:white;border:1px solid #43a047;border-radius:16px;padding:3px 12px;font-size:12px;cursor:pointer;color:#1b5e20;font-weight:600';
+      btn.textContent=name;
+      btn.onclick=function(){
+        var parts=(name||'').split(' ');
+        var fn=parts[0]||'';var ln=parts.slice(1).join(' ')||'';
+        if(qs('lf-firstname'))qs('lf-firstname').value=fn;
+        if(qs('lf-lastname'))qs('lf-lastname').value=ln;
+        // עדכן כותרת
+        title.innerHTML='✅ מטופל קיים — '+name+'<button onclick="document.getElementById(&quot;patient-history-panel&quot;).remove()" style="background:none;border:none;cursor:pointer;color:#555;font-size:14px">✕</button>';
+      };
+      nameList.appendChild(btn);
+    });
+    panel.appendChild(nameList);
+  }
 
   // סטטיסטיקות
   var done=history.filter(function(l){return l.appointment_done;});
@@ -2041,7 +2071,44 @@ async function showPatientHistory(lead){
     panel.appendChild(docDiv);
   }
 
-  // 3 ביקורים אחרונים
+  // כפתורי פעולה
+  var btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:8px;margin-bottom:10px';
+
+  // כפתור: אותו רופא
+  if(lastDocName){
+    var sameDocBtn=document.createElement('button');
+    sameDocBtn.className='btn btn-primary btn-sm';
+    sameDocBtn.style.cssText='font-size:11px;flex:1';
+    sameDocBtn.innerHTML='👨‍⚕️ אותו רופא — '+lastDocName.replace(/ד"ר /,'').split('(')[0].trim();
+    sameDocBtn.onclick=function(){
+      var parts=(lead.full_name||'').split(' ');
+      if(qs('lf-firstname'))qs('lf-firstname').value=parts[0]||'';
+      if(qs('lf-lastname'))qs('lf-lastname').value=parts.slice(1).join(' ')||'';
+      if(qs('lf-doctor-search'))qs('lf-doctor-search').value=lastDocName;
+      if(qs('lf-doctor'))qs('lf-doctor').value=lastDocName;
+    };
+    btnRow.appendChild(sameDocBtn);
+  }
+
+  // כפתור: רופא חדש
+  var newDocBtn=document.createElement('button');
+  newDocBtn.className='btn btn-outline btn-sm';
+  newDocBtn.style.cssText='font-size:11px;flex:1';
+  newDocBtn.textContent='🔄 רופא חדש';
+  newDocBtn.onclick=function(){
+    var parts=(lead.full_name||'').split(' ');
+    if(qs('lf-firstname'))qs('lf-firstname').value=parts[0]||'';
+    if(qs('lf-lastname'))qs('lf-lastname').value=parts.slice(1).join(' ')||'';
+    if(qs('lf-doctor-search'))qs('lf-doctor-search').value='';
+    if(qs('lf-doctor'))qs('lf-doctor').value='';
+    var docField=qs('lf-doctor-search')||qs('lf-doctor');
+    if(docField)docField.focus();
+  };
+  btnRow.appendChild(newDocBtn);
+  panel.appendChild(btnRow);
+
+  // 4 ביקורים אחרונים
   var recTitle=document.createElement('div');
   recTitle.style.cssText='font-weight:600;color:#333;margin-bottom:4px;font-size:11px';
   recTitle.textContent='ביקורים אחרונים:';
