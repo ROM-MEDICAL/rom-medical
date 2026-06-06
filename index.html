@@ -1,4 +1,4 @@
-<!-- build: 1780773370 -->
+<!-- build: 1780775235 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1943,9 +1943,10 @@ async function onPhoneInput(val){
   if(qs('lf-id').value){qs('phone-suggest').style.display='none';return;}
   if(clean.length<7){qs('phone-suggest').style.display='none';return;}
   // Search both with and without dash
+  // הצג הצעות רק כשיש התאמה מלאה של הטלפון (לא חלקית)
   const matches=allLeads.filter(function(l){
     var lp=(l.phone||'').replace(/[-\s]/g,'');
-    return lp.includes(clean)||clean.includes(lp.slice(0,7));
+    return lp===clean||(lp.length===10&&clean.length>=9&&lp.startsWith(clean));
   }).slice(0,5);
   if(matches.length){
     qs('phone-suggest').style.display='block';
@@ -1955,6 +1956,11 @@ async function onPhoneInput(val){
   } else qs('phone-suggest').style.display='none';
   // Trigger returning customer popup when phone is complete
   if(clean.length>=9) await checkReturningCustomer(clean);
+  // הסתר הצעות אם הטלפון הושלם ונמצא התאמה מדויקת
+  if(clean.length===10&&matches.length===1&&(matches[0].phone||'').replace(/[-\s]/g,'')===clean){
+    qs('phone-suggest').style.display='none';
+    showPatientHistory(matches[0]);
+  }
 }
 function fillFromLead(id){
   const l=allLeads.find(x=>x.id===id);if(!l)return;
@@ -1964,6 +1970,77 @@ function fillFromLead(id){
   if(qs('lf-doctor-search'))qs('lf-doctor-search').value=l.doctor||'';
   qs('phone-suggest').style.display='none';
 }
+async function showPatientHistory(lead){
+  // בדוק אם כבר מוצגת חלונית
+  var old=document.getElementById('patient-history-panel');
+  if(old)old.remove();
+
+  // טען את כל הלידים של המטופל לפי טלפון
+  var phone=(lead.phone||'').replace(/[-\s]/g,'');
+  var{data:history}=await db.from('leads')
+    .select('full_name,doctor,original_date,appointment_date,appointment_done,lead_status,cancelled,notes')
+    .ilike('phone','%'+phone.slice(-9)+'%')
+    .order('original_date',{ascending:false})
+    .limit(20);
+
+  if(!history||!history.length)return;
+
+  var panel=document.createElement('div');
+  panel.id='patient-history-panel';
+  panel.style.cssText='background:#e8f5e9;border:2px solid #43a047;border-radius:10px;padding:14px;margin-top:10px;font-size:12px';
+
+  // כותרת
+  var title=document.createElement('div');
+  title.style.cssText='font-weight:700;color:#1b5e20;margin-bottom:10px;font-size:13px;display:flex;justify-content:space-between';
+  title.innerHTML='✅ מטופל קיים — '+lead.full_name+'<button onclick="document.getElementById('patient-history-panel').remove()" style="background:none;border:none;cursor:pointer;color:#555;font-size:14px">✕</button>';
+  panel.appendChild(title);
+
+  // סטטיסטיקות
+  var done=history.filter(function(l){return l.appointment_done;});
+  var cancelled=history.filter(function(l){return l.cancelled||l.lead_status==='בוטל';});
+  var doctors=[...new Set(history.filter(function(l){return l.appointment_done&&l.doctor;}).map(function(l){return l.doctor.replace(/ד"ר /,'').split('(')[0].trim();}))];
+
+  var stats=document.createElement('div');
+  stats.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px';
+  [{label:'תורים שבוצעו',val:done.length,color:'#2e7d32'},
+   {label:'ביטולים',val:cancelled.length,color:'#c62828'},
+   {label:'פניות סה"כ',val:history.length,color:'#1565c0'}
+  ].forEach(function(s){
+    stats.innerHTML+='<div style="background:white;border-radius:6px;padding:6px;text-align:center"><div style="font-size:18px;font-weight:700;color:'+s.color+'">'+s.val+'</div><div style="font-size:10px;color:#555">'+s.label+'</div></div>';
+  });
+  panel.appendChild(stats);
+
+  // רופאים שביקר
+  if(doctors.length){
+    var docDiv=document.createElement('div');
+    docDiv.style.cssText='margin-bottom:8px;font-size:11px;color:#333';
+    docDiv.innerHTML='<strong>רופאים שביקר:</strong> '+doctors.join(' | ');
+    panel.appendChild(docDiv);
+  }
+
+  // 3 ביקורים אחרונים
+  var recTitle=document.createElement('div');
+  recTitle.style.cssText='font-weight:600;color:#333;margin-bottom:4px;font-size:11px';
+  recTitle.textContent='ביקורים אחרונים:';
+  panel.appendChild(recTitle);
+
+  history.slice(0,4).forEach(function(l){
+    var row=document.createElement('div');
+    row.style.cssText='display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #c8e6c9;font-size:11px';
+    var status=l.appointment_done?'✅ בוצע':(l.cancelled||l.lead_status==='בוטל')?'❌ בוטל':'📋 '+l.lead_status;
+    row.innerHTML='<span>'+(l.appointment_date||l.original_date||'—')+'</span>'
+      +'<span style="color:#555">'+(l.doctor||'—').replace(/ד"ר /,'').split('(')[0].trim()+'</span>'
+      +'<span>'+status+'</span>';
+    panel.appendChild(row);
+  });
+
+  // הוסף אחרי שדה הטלפון
+  var phoneField=document.getElementById('lf-phone');
+  if(phoneField&&phoneField.parentNode){
+    phoneField.parentNode.parentNode.insertBefore(panel,phoneField.parentNode.nextSibling);
+  }
+}
+
 function searchDoctors(val){
   if(!val||val.length<1){var b=document.getElementById('doctor-suggest');if(b)b.style.display='none';return;}
   searchDoctorInput(val);
@@ -1979,6 +2056,8 @@ async function saveLead(){
   if(!dateVal){showToast('נא למלא תאריך קבלת ליד');return;}
   if(!timeVal){showToast('נא למלא שעת קבלת ליד');return;}
   if(!phone||!fn){showToast('נא למלא טלפון ושם פרטי');return;}
+  var doctorVal=(qs('lf-doctor-search')||qs('lf-doctor'));
+  if(!doctorVal||!doctorVal.value.trim()){showToast('נא לבחור רופא מבוקש');if(doctorVal){doctorVal.style.border='2px solid #c62828';doctorVal.focus();}return;}
   if(!secretary){showToast('נא לבחור מזכירה אחראית');return;}
   if(!status){showToast('נא לבחור סטטוס ליד');return;}
   // ולידציה: נקבע תור חייב תאריך תור
