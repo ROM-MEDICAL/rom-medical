@@ -1,4 +1,4 @@
-<!-- build: 1780778533 -->
+<!-- build: 1780778889 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1940,7 +1940,6 @@ function toggleCancel(){}
 
 async function onPhoneInput(val){
   var clean=val.replace(/[-\s]/g,'');
-  console.log('[PHONE] val='+val+' clean='+clean+' len='+clean.length+' allLeads='+allLeads.length);
   if(qs('lf-id').value){qs('phone-suggest').style.display='none';return;}
   if(clean.length<7){qs('phone-suggest').style.display='none';return;}
 
@@ -1964,18 +1963,15 @@ async function onPhoneInput(val){
     }).join('');
   } else qs('phone-suggest').style.display='none';
 
-  console.log('[PHONE] matches='+matches.length+' clean.length='+clean.length);
   // כשהמספר שלם ויש התאמה מדויקת — הצג היסטוריית מטופל
   if(clean.length>=10){
     // השתמש ב-matches שכבר חושבו (מה-DB או מ-allLeads)
     var exactMatch=matches.find(function(l){
       var lp=(l.phone||'').replace(/[^0-9]/g,'').slice(-10);
       var cp=clean.replace(/[^0-9]/g,'').slice(-10);
-      console.log('[EXACT] lp='+lp+' cp='+cp+' eq='+(lp===cp));
       return lp===cp;
     });
     if(exactMatch){
-      console.log('[PHONE] exactMatch found: '+exactMatch.full_name);
       qs('phone-suggest').style.display='none';
       showPatientHistory(exactMatch);
     }
@@ -1996,8 +1992,6 @@ async function showPatientHistory(lead){
   // טען את כל הלידים של המטופל לפי טלפון
   var rawPhone=(lead.phone||'').replace(/[^0-9]/g,'');
   var phoneSlice=rawPhone.length>=7?rawPhone.slice(-7):rawPhone;
-  console.log('[HISTORY] lead.phone='+lead.phone+' rawPhone='+rawPhone+' slice='+phoneSlice);
-  if(!phoneSlice){console.log('[HISTORY] no phone — abort');return;}
 
   var res=await db.from('leads')
     .select('full_name,doctor,original_date,appointment_date,appointment_done,lead_status,cancelled,notes')
@@ -2005,7 +1999,6 @@ async function showPatientHistory(lead){
     .order('original_date',{ascending:false})
     .limit(20);
   var history=res.data||[];
-  console.log('[HISTORY] results='+history.length);
   if(!history.length)return;
 
   var panel=document.createElement('div');
@@ -2128,16 +2121,12 @@ async function showPatientHistory(lead){
   var existing=document.getElementById('patient-history-panel');
   if(existing)existing.remove();
   var phoneField=document.getElementById('lf-phone');
-  console.log('[HISTORY] phoneField=',phoneField,'lead=',lead.full_name);
   if(phoneField){
     var insertAfter=phoneField.closest('.form-group')||phoneField.parentNode;
-    console.log('[HISTORY] insertAfter=',insertAfter);
     if(insertAfter&&insertAfter.parentNode){
       insertAfter.parentNode.insertBefore(panel, insertAfter.nextSibling);
-      console.log('[HISTORY] inserted OK');
     } else {
       var modalBody=document.querySelector('#lead-modal .modal-body')||document.querySelector('.modal-body');
-      console.log('[HISTORY] fallback modalBody=',modalBody);
       if(modalBody)modalBody.insertBefore(panel, modalBody.firstChild);
       else document.body.appendChild(panel);
     }
@@ -2982,7 +2971,6 @@ async function loadAppointments(){
   ]);
   var appts=r1.data||[];
   var allLeadsData=r2.data||[];
-  console.log('[DEBUG appts]',appts.length,'תורים החודש',appts.slice(0,3).map(function(a){return a.full_name+' '+a.appointment_date+' done='+a.appointment_done+' tipulog='+a.tipulog_synced;}));
   var procs=r3.data||[];
 
   // ===== רשימת תורים הממתינים לאישור (מאי 2026 והלאה) =====
@@ -3080,7 +3068,6 @@ async function loadAppointments(){
   // Get doctor name from linked_doctor_name or display_name
   var myDoctorName=myUser?(myUser.linked_doctor_name||currentProfile.display_name||currentProfile.full_name||''):'';
   var docFirst=myDoctorName.replace(/ד"ר /g,'').split('(')[0].trim().split(' ')[0];
-  console.log('[DOCTOR] myDoctorName='+myDoctorName+' docFirst='+docFirst+' isDoctorAdmin='+isDoctorAdmin+' isDoctorOnly='+isDoctorOnly+' isSecretary='+isSecretary);
   
   function matchesMyDoctor(l){
     if(!docFirst||docFirst.length<2)return false;
@@ -3185,7 +3172,6 @@ async function loadAppointments(){
   });
   var myConfirmedRevenue=0;
   myConfirmedAppts.forEach(function(a){myConfirmedRevenue+=Number(a.deduction_amount||0);});
-  console.log('[DEBUG confirmed]',myConfirmedAppts.length,'תורים מאומתים','rev='+myConfirmedRevenue,'appts='+appts.length,'myAppts='+myAppts.length);
   var allConfirmedRevenue=0;
   allConfirmedAppts.forEach(function(a){allConfirmedRevenue+=Number(a.deduction_amount||0);});
   // תיקון: myAppts ← myConfirmedAppts לתאימות
@@ -3243,7 +3229,6 @@ async function loadAppointments(){
   var myTotalApptCount=myDoneCount+myPendingCount+myFutureLeads.length;
 
   // DEBUG — הסר לאחר אימות
-  console.log('[REVENUE]',{
     confirmed_appts: allConfirmedAppts.length,
     confirmed_total: allConfirmedRevenue,
     pending_count: allPastUnconfirmed.length,
@@ -3477,8 +3462,7 @@ async function loadAppointments(){
       h+='<div style="margin-top:4px"><span style="font-size:11px;font-weight:600;color:'+pctColor+'">אומת: '+pct+'%</span></div>';
       h+='</div>';return h;
     }
-    console.log('[DASHBOARD REV] myConfirmedRevenue='+myConfirmedRevenue+' myDoneCount='+myDoneCount+' allConfirmedRevenue='+allConfirmedRevenue+' appts.len='+appts.length+' myAppts.len='+myAppts.length+' myConfirmedAppts.len='+myConfirmedAppts.length+' isDoctorOnly='+isDoctorOnly+' showDual='+showDual);
-    var c1='<div class="card" style="padding:12px"><div style="font-size:12px;font-weight:700;color:#4f46e5;margin-bottom:8px;border-bottom:1px solid #e0e0e0;padding-bottom:5px">✅ מאומת</div>';
+      var c1='<div class="card" style="padding:12px"><div style="font-size:12px;font-weight:700;color:#4f46e5;margin-bottom:8px;border-bottom:1px solid #e0e0e0;padding-bottom:5px">✅ מאומת</div>';
     if(showDual){
       c1+='<div style="display:grid;grid-template-columns:1fr 1px 1fr;align-items:start">';
       c1+=revCell('',myConfirmedRevenue,myDoneCount+' תורים',accuracyPct,accuracyColor,'my');
