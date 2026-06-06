@@ -1,4 +1,4 @@
-<!-- build: 1780776153 -->
+<!-- build: 1780776411 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1942,21 +1942,30 @@ async function onPhoneInput(val){
   var clean=val.replace(/[-\s]/g,'');
   if(qs('lf-id').value){qs('phone-suggest').style.display='none';return;}
   if(clean.length<7){qs('phone-suggest').style.display='none';return;}
-  // Search both with and without dash
-  // הצג הצעות בזמן הקלדה — התאמה מתחילת המספר
-  const matches=allLeads.filter(function(l){
+
+  // אם allLeads לא טעון — שאל מה-DB ישירות
+  var searchLeads=allLeads||[];
+  if(!searchLeads.length&&clean.length>=7){
+    var res=await db.from('leads').select('id,full_name,phone,doctor,appointment_date,appointment_done,lead_status,cancelled,notes,original_date,secretary')
+      .ilike('phone','%'+clean.slice(-7)+'%').limit(20);
+    searchLeads=res.data||[];
+  }
+
+  var matches=searchLeads.filter(function(l){
     var lp=(l.phone||'').replace(/[-\s]/g,'');
     return lp.startsWith(clean)||(clean.length>=10&&lp===clean);
   }).slice(0,5);
+
   if(matches.length){
     qs('phone-suggest').style.display='block';
     qs('phone-suggest').innerHTML=matches.map(function(m){
       return'<div class="suggest-item" onclick="fillFromLead(\''+m.id+'\')">'+( m.full_name||'—')+' – '+(m.phone||'')+' – '+(m.doctor||'—')+'</div>';
     }).join('');
   } else qs('phone-suggest').style.display='none';
-  // כשהמספר שלם (10 ספרות) ויש התאמה מדויקת — הצג היסטוריית מטופל
+
+  // כשהמספר שלם ויש התאמה מדויקת — הצג היסטוריית מטופל
   if(clean.length>=10){
-    var exactMatch=allLeads.find(function(l){
+    var exactMatch=searchLeads.find(function(l){
       return (l.phone||'').replace(/[-\s]/g,'')===clean;
     });
     if(exactMatch){
