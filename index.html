@@ -1,4 +1,4 @@
-<!-- build: 1780741645 -->
+<!-- build: 1780742998 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2632,7 +2632,7 @@ async function loadAppointments(){
   var weekEndStr=new Date(now.getFullYear(),now.getMonth(),now.getDate()+(7-now.getDay())).toISOString().slice(0,10);
 
   var[r1,r2,r3]=await Promise.all([
-    db.from('leads').select('id,full_name,phone,doctor,appointment_date,appointment_time,deduction_amount,appointment_done,appointment_confirmed,tipulog_synced,lead_status,cancelled,source').eq('appointment_done',true).gte('appointment_date',thisMonthStart).neq('cancelled',true).order('appointment_date',{ascending:false}),
+    db.from('leads').select('id,full_name,phone,doctor,appointment_date,appointment_time,deduction_amount,appointment_done,appointment_confirmed,tipulog_synced,lead_status,cancelled,source,secretary,original_date').eq('appointment_done',true).gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr).neq('cancelled',true).order('appointment_date',{ascending:false}),
     db.from('leads').select('*').order('original_date',{ascending:false}).range(0,29999),
     db.from('procedures').select('*')
   ]);
@@ -3006,10 +3006,10 @@ async function loadAppointments(){
         && l.original_date<=todayStr;
     });
     var myDoneMonth=appts.filter(function(a){
-      return (a.doctor||'').includes(docFirst||'')
-        && a.appointment_date>=thisMonthStart
-        && a.appointment_date<=todayStr
-        && a.appointment_date.slice(0,7)===thisMonthStart.slice(0,7);
+      return (a.doctor||'').includes(docFirst||'');
+    });
+    var mySecDoneMonth=appts.filter(function(a){
+      return (a.secretary||'')===(currentProfile.display_name||myName||'');
     });
     var nextAppts=leadsAll.filter(function(l){
       return l.appointment_date>todayStr
@@ -3041,11 +3041,8 @@ async function loadAppointments(){
         &&l.original_date&&l.original_date>=thisMonthStart
         &&l.original_date<=todayStr;
     });
-    var mySecDoneMonth=appts.filter(function(a){
-      return (a.secretary||'')===mySecName
-        &&a.appointment_date>=thisMonthStart
-        &&a.appointment_date<=todayStr
-        &&a.appointment_date.slice(0,7)===thisMonthStart.slice(0,7);
+    var mySecDone=mySecDoneMonth||appts.filter(function(a){
+      return (a.secretary||'')===mySecName;
     });
     var mySecFuture=leadsAll.filter(function(l){
       return (l.secretary||'')===mySecName
@@ -3056,7 +3053,7 @@ async function loadAppointments(){
 
     html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
     html+=numCard2('📋 לידים שטיפלתי — '+mn, myLeadsMonth.length,'#1565c0');
-    html+=numCard2('✅ תורים שקבעתי — '+mn, mySecDoneMonth.length,'#2e7d32');
+    html+=numCard2('✅ תורים שקבעתי — '+mn, mySecDone.length,'#2e7d32');
     html+='</div>';
     html+=listCard2('🗓️ תורים היום — כל המרפאה', todayApptsList,'אין תורים היום',apptRow);
     html+=numCard2('🗓️ תורים עתידיים שלי — '+mn, mySecFuture.length,'#e65100');
