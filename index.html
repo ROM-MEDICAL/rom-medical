@@ -1,4 +1,4 @@
-<!-- build: 1780778889 -->
+<!-- build: 1780779009 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -3228,17 +3228,6 @@ async function loadAppointments(){
   var allRevenue2=allConfirmedRevenue;
   var myTotalApptCount=myDoneCount+myPendingCount+myFutureLeads.length;
 
-  // DEBUG — הסר לאחר אימות
-    confirmed_appts: allConfirmedAppts.length,
-    confirmed_total: allConfirmedRevenue,
-    pending_count: allPastUnconfirmed.length,
-    future_count: allFutureLeads.length,
-    estimated: allEstimatedRevenue,
-    forecast: allForecastRevenue,
-    sample_pending: allPastUnconfirmed.slice(0,3).map(function(l){
-      return {name:l.full_name,date:l.appointment_date,done:l.appointment_done,confirmed:l.appointment_confirmed};
-    })
-  });
 
   // ביצועי מזכירות — לפי return_date (תאריך טיפול בליד)
   var secStats={};
