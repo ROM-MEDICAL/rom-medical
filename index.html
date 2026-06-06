@@ -1,4 +1,4 @@
-<!-- build: 1780777313 -->
+<!-- build: 1780777698 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1994,15 +1994,19 @@ async function showPatientHistory(lead){
   if(old)old.remove();
 
   // טען את כל הלידים של המטופל לפי טלפון
-  var phone=(lead.phone||'').replace(/[^0-9]/g,'').slice(-9);
-  console.log('[HISTORY] querying phone slice='+phone);
+  var rawPhone=(lead.phone||'').replace(/[^0-9]/g,'');
+  var phoneSlice=rawPhone.slice(-9);
+  console.log('[HISTORY] lead.phone='+lead.phone+' rawPhone='+rawPhone+' slice='+phoneSlice);
+  if(!phoneSlice){console.log('[HISTORY] no phone — abort');return;}
+
   var res=await db.from('leads')
     .select('full_name,doctor,original_date,appointment_date,appointment_done,lead_status,cancelled,notes')
-    .ilike('phone','%'+phone+'%')
+    .ilike('phone','%'+phoneSlice+'%')
     .order('original_date',{ascending:false})
     .limit(20);
   var history=res.data||[];
   console.log('[HISTORY] results='+history.length);
+  if(!history.length)return;
 
   var panel=document.createElement('div');
   panel.id='patient-history-panel';
