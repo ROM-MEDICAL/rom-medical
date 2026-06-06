@@ -1,4 +1,4 @@
-<!-- build: 1780776865 -->
+<!-- build: 1780777034 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2052,15 +2052,23 @@ async function showPatientHistory(lead){
   var existing=document.getElementById('patient-history-panel');
   if(existing)existing.remove();
   var phoneField=document.getElementById('lf-phone');
+  console.log('[HISTORY] phoneField=',phoneField,'lead=',lead.full_name);
   if(phoneField){
     var insertAfter=phoneField.closest('.form-group')||phoneField.parentNode;
+    console.log('[HISTORY] insertAfter=',insertAfter);
     if(insertAfter&&insertAfter.parentNode){
       insertAfter.parentNode.insertBefore(panel, insertAfter.nextSibling);
+      console.log('[HISTORY] inserted OK');
     } else {
-      // fallback — הכנס בתחילת ה-modal
-      var modalBody=document.querySelector('#lead-modal .modal-body');
+      var modalBody=document.querySelector('#lead-modal .modal-body')||document.querySelector('.modal-body');
+      console.log('[HISTORY] fallback modalBody=',modalBody);
       if(modalBody)modalBody.insertBefore(panel, modalBody.firstChild);
+      else document.body.appendChild(panel);
     }
+  } else {
+    // אם lf-phone לא נמצא — הכנס ל-body
+    console.log('[HISTORY] no phoneField — appending to body');
+    document.body.appendChild(panel);
   }
 }
 
