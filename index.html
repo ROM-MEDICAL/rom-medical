@@ -1,4 +1,4 @@
-<!-- build: 1780771559 -->
+<!-- build: 1780771847 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -3389,9 +3389,9 @@ async function loadAppointments(){
       var td4=document.createElement('td');td4.style.textAlign='center';
       var badge=document.createElement('span');badge.style.cssText='background:'+color+';color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700';
       badge.textContent=pct+'%';td4.appendChild(badge);tr.appendChild(td4);
-      // History button (admin only)
+      // History button (admin + secretary for own data)
       var td5=document.createElement('td');
-      if(isAdmin2){
+      if(isAdmin2||(s===mySecName2)){
         var hBtn=document.createElement('button');hBtn.className='btn btn-outline btn-sm';hBtn.style.fontSize='10px';hBtn.textContent='📊 היסטוריה';
         hBtn.onclick=(function(name){return function(){showSecHistory(name);};})(s);
         td5.appendChild(hBtn);
@@ -7091,8 +7091,10 @@ async function showSecHistory(secName){
   overlay.appendChild(modal);document.body.appendChild(overlay);
   
   // Load last 6 months of data for this secretary
+  var h6=new Date();h6.setMonth(h6.getMonth()-5);h6.setDate(1);
+  var h6Str=h6.getFullYear()+'-'+(h6.getMonth()+1<10?'0':'')+(h6.getMonth()+1)+'-01';
   var{data:leads}=await db.from('leads').select('original_date,lead_status,cancelled,secretary')
-    .eq('secretary',secName).gte('original_date',new Date(new Date().getFullYear(),new Date().getMonth()-5,1).toISOString().slice(0,10));
+    .eq('secretary',secName).gte('original_date',h6Str);
   
   loading.remove();
   
