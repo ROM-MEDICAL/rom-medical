@@ -1,4 +1,4 @@
-<!-- build: 1780776411 -->
+<!-- build: 1780776683 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2046,10 +2046,19 @@ async function showPatientHistory(lead){
     panel.appendChild(row);
   });
 
-  // הוסף אחרי שדה הטלפון
+  // הוסף אחרי שדה הטלפון — חפש את ה-modal body
+  var existing=document.getElementById('patient-history-panel');
+  if(existing)existing.remove();
   var phoneField=document.getElementById('lf-phone');
-  if(phoneField&&phoneField.parentNode){
-    phoneField.parentNode.parentNode.insertBefore(panel,phoneField.parentNode.nextSibling);
+  if(phoneField){
+    var insertAfter=phoneField.closest('.form-group')||phoneField.parentNode;
+    if(insertAfter&&insertAfter.parentNode){
+      insertAfter.parentNode.insertBefore(panel, insertAfter.nextSibling);
+    } else {
+      // fallback — הכנס בתחילת ה-modal
+      var modalBody=document.querySelector('#lead-modal .modal-body');
+      if(modalBody)modalBody.insertBefore(panel, modalBody.firstChild);
+    }
   }
 }
 
