@@ -1,4 +1,4 @@
-<!-- build: 1780743789 -->
+<!-- build: 1780745313 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -3736,15 +3736,15 @@ async function loadIncome(){
       .gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr),
     // חודש -1
     db.from('leads').select('doctor,deduction_amount,appointment_done')
-      .eq('appointment_done',true).neq('deduction_amount',null)
+      .eq('appointment_done',true)
       .gte('appointment_date',mStart(1)).lt('appointment_date',mStart(0)),
     // חודש -2
     db.from('leads').select('doctor,deduction_amount,appointment_done')
-      .eq('appointment_done',true).neq('deduction_amount',null)
+      .eq('appointment_done',true)
       .gte('appointment_date',mStart(2)).lt('appointment_date',mStart(1)),
     // חודש -3
     db.from('leads').select('doctor,deduction_amount,appointment_done')
-      .eq('appointment_done',true).neq('deduction_amount',null)
+      .eq('appointment_done',true)
       .gte('appointment_date',mStart(3)).lt('appointment_date',mStart(2)),
     // ממתינים לאימות (תאריך עבר, לא בוטל, לא אומת)
     db.from('leads').select('id,doctor,lead_status,cancelled,appointment_done,appointment_confirmed,appointment_date')
@@ -3754,11 +3754,13 @@ async function loadIncome(){
   // apptLeadIds לא רלוונטי יותר — מקור יחיד
   var apptLeadIds=new Set();
 
-  // מאומת = leads עם appointment_done=true + deduction_amount
-  var confirmedCur=(rL.data||[]).filter(function(l){
-    return l.appointment_done&&l.deduction_amount>0&&!l.cancelled;
-  }).map(function(l){
-    return {doctor:l.doctor,deduction_amount:l.deduction_amount,procedure_name:null};
+  // מאומת = leads עם appointment_done=true (כולל deduction_amount=null)
+  // נספור את כולם, נחשב הכנסה רק לאלו עם סכום
+  var confirmedCurAll=(rL.data||[]).filter(function(l){
+    return l.appointment_done&&!l.cancelled;
+  });
+  var confirmedCur=confirmedCurAll.map(function(l){
+    return {doctor:l.doctor,deduction_amount:l.deduction_amount||0,procedure_name:null};
   });
 
   var r0merged={data:confirmedCur};
