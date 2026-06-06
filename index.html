@@ -1,4 +1,4 @@
-<!-- build: 1780755549 -->
+<!-- build: 1780756454 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -965,7 +965,7 @@ async function loadDashboard(){
   }
 
   // --- מזכירה: לידים הדורשים המשך טיפול + תורים למחר ---
-  if((isSecretary||isAdmin)&&!isDoctorOnly){
+  if(isSecretary&&!isDoctorOnly&&!isDoctorAdmin){
     var secExtra=document.getElementById('dash-sec-extra');
     if(!secExtra){
       secExtra=document.createElement('div');secExtra.id='dash-sec-extra';
@@ -1032,7 +1032,7 @@ async function loadDashboard(){
   }
 
   // --- Admin: סיכום הכנסות מרפאה + רופאים עם תורים עתידיים ---
-  if(isAdmin&&!isDoctorOnly){
+  if(isAdmin&&!isDoctorOnly&&!isDoctorAdmin){
     var adminExtra=document.getElementById('dash-admin-extra');
     if(!adminExtra){
       adminExtra=document.createElement('div');adminExtra.id='dash-admin-extra';
