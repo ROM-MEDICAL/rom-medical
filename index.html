@@ -1,4 +1,4 @@
-<!-- build: 1780750962 -->
+<!-- build: 1780755108 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1484,7 +1484,7 @@ async function addLeadSource(){
 
 // ===== SECRETARIES =====
 var allSecretaries=[];
-var BASE_SECRETARIES=['אריאל','אבי','יובל','עמית','ספיר'];
+var BASE_SECRETARIES=['אריאל','אבי','יובל','עמית','ספיר','דינה','טל','מרתה'];
 async function loadSecretaries(){
   var secNames=[...BASE_SECRETARIES];
   // Add any secretary-role users from profiles not already in list
@@ -4892,6 +4892,67 @@ async function loadAdmin(){
     tbl.appendChild(tr);
   });
   el.appendChild(tbl);
+
+  // ===== ניהול מזכירות =====
+  var secHdr=document.createElement('div');
+  secHdr.style.cssText='font-size:16px;font-weight:700;color:#4f46e5;margin-top:28px;margin-bottom:12px';
+  secHdr.textContent='👥 ניהול רשימת מזכירות';
+  el.appendChild(secHdr);
+
+  var secBox=document.createElement('div');
+  secBox.style.cssText='background:#f8f9fa;border-radius:12px;padding:16px;margin-bottom:20px';
+  secBox.id='sec-mgmt-box';
+
+  function renderSecList(){
+    secBox.innerHTML='';
+    // רשימה נוכחית
+    var list=document.createElement('div');
+    list.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px';
+    BASE_SECRETARIES.forEach(function(s){
+      var chip=document.createElement('div');
+      chip.style.cssText='display:flex;align-items:center;gap:6px;background:#fff;border:1px solid #e0e0e0;border-radius:20px;padding:5px 12px;font-size:13px';
+      chip.innerHTML='<span>'+s+'</span>';
+      var del=document.createElement('button');
+      del.textContent='✕';
+      del.style.cssText='background:none;border:none;color:#c62828;cursor:pointer;font-size:12px;padding:0;line-height:1';
+      del.title='הסר מהרשימה הפעילה';
+      del.onclick=function(){
+        if(confirm('להסיר את '+s+' מהרשימה הפעילה? הנתונים ההיסטוריים שלה יישמרו.')){
+          var idx=BASE_SECRETARIES.indexOf(s);
+          if(idx>-1)BASE_SECRETARIES.splice(idx,1);
+          // עדכן את כל רשימות הבחירה
+          if(typeof loadLeadSources==='function')loadLeadSources();
+          renderSecList();
+        }
+      };
+      chip.appendChild(del);
+      list.appendChild(chip);
+    });
+    secBox.appendChild(list);
+
+    // הוספת מזכירה חדשה
+    var addRow=document.createElement('div');
+    addRow.style.cssText='display:flex;gap:8px;align-items:center';
+    var inp=document.createElement('input');
+    inp.type='text';inp.placeholder='שם מזכירה חדשה';
+    inp.style.cssText='border:1px solid #e0e0e0;border-radius:8px;padding:7px 12px;font-size:13px;width:200px;direction:rtl';
+    var addBtn2=document.createElement('button');
+    addBtn2.className='btn btn-primary btn-sm';
+    addBtn2.textContent='+ הוסף';
+    addBtn2.onclick=function(){
+      var name=(inp.value||'').trim();
+      if(!name){alert('יש להזין שם');return;}
+      if(BASE_SECRETARIES.includes(name)){alert('מזכירה זו כבר קיימת');return;}
+      BASE_SECRETARIES.push(name);
+      inp.value='';
+      if(typeof loadLeadSources==='function')loadLeadSources();
+      renderSecList();
+    };
+    addRow.appendChild(inp);addRow.appendChild(addBtn2);
+    secBox.appendChild(addRow);
+  }
+  renderSecList();
+  el.appendChild(secBox);
 
   // Attendance log section
   var attHdr=document.createElement('div');
