@@ -1,4 +1,4 @@
-<!-- build: 1780742998 -->
+<!-- build: 1780743789 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -2623,13 +2623,16 @@ async function loadAppointments(){
   var isSecretary=!isAdmin&&!isDoctorOnly;
 
   var now=new Date();
-  var todayStr=now.toISOString().slice(0,10);
-  var thisMonthStart=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
-  var thisMonthEnd=new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10);
-  var prevMonthStart=new Date(now.getFullYear(),now.getMonth()-1,1).toISOString().slice(0,10);
-  var prevMonthSameDay=new Date(now.getFullYear(),now.getMonth()-1,now.getDate()).toISOString().slice(0,10);
-  var weekStartStr=new Date(now.getFullYear(),now.getMonth(),now.getDate()-now.getDay()+1).toISOString().slice(0,10);
-  var weekEndStr=new Date(now.getFullYear(),now.getMonth(),now.getDate()+(7-now.getDay())).toISOString().slice(0,10);
+  var pad=function(n){return n<10?'0'+n:''+n;};
+  var todayStr=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
+  var thisMonthStart=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-01';
+  var lastDay=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+  var thisMonthEnd=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(lastDay);
+  var prevM=new Date(now.getFullYear(),now.getMonth()-1,1);
+  var prevMonthStart=prevM.getFullYear()+'-'+pad(prevM.getMonth()+1)+'-01';
+  var prevMonthSameDay=prevM.getFullYear()+'-'+pad(prevM.getMonth()+1)+'-'+pad(now.getDate());
+  var weekStartStr=todayStr; // לא בשימוש
+  var weekEndStr=todayStr;   // לא בשימוש
 
   var[r1,r2,r3]=await Promise.all([
     db.from('leads').select('id,full_name,phone,doctor,appointment_date,appointment_time,deduction_amount,appointment_done,appointment_confirmed,tipulog_synced,lead_status,cancelled,source,secretary,original_date').eq('appointment_done',true).gte('appointment_date',thisMonthStart).lte('appointment_date',todayStr).neq('cancelled',true).order('appointment_date',{ascending:false}),
