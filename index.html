@@ -1,4 +1,4 @@
-<!-- build: 1780745313 -->
+<!-- build: 1780750962 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -1209,28 +1209,18 @@ function filterLeads(){
     if(toV)cutoffEnd=new Date(toV+'T23:59:59');
   }
   var searchVal=(qs('f-search').value||'').toLowerCase().trim();
-  var isNameSearch=searchVal.length>1&&!searchVal.match(/[0-9]/);
+  // חיפוש שם/טלפון — כמו כל שאר הפרמטרים, לא עוקף תאריך
   
-  // For name searches, bypass date filter and search all leads
-  if(isNameSearch&&searchVal.length>1){
-    filteredLeads=allLeads.filter(l=>{
-      var nameMatch=(l.full_name||'').toLowerCase().includes(searchVal);
-      if(!nameMatch)return false;
-      if(doctor&&l.doctor!==doctor)return false;
-      if(secretary&&l.secretary!==secretary)return false;
-      if(status&&l.lead_status!==status)return false;
-      if(source&&l.source!==source)return false;
-      return true;
-    });
-    filteredLeads.sort((a,b)=>new Date(b.original_date||b.created_at||0)-new Date(a.original_date||a.created_at||0));
-    renderLeadsTable();return;
-  }
-  
-  // כאשר סטטוס = "נקבע תור" — חיפוש לפי appointment_date, ללא מגבלת תאריך
+  // כאשר סטטוס = "נקבע תור" — מסנן לפי appointment_date אם יש תאריך, אחרת לפי original_date
   var isApptSearch=(status==='נקבע תור'||status==='appointment_done');
   filteredLeads=allLeads.filter(l=>{
     if(isApptSearch){
-      // חיפוש תורים: לא מסנן לפי תאריך קבלת ליד, אלא לפי appointment_date
+      // סינון לפי appointment_date אם יש תאריך מוגדר, אחרת ללא מגבלת תאריך
+      if(cutoff||cutoffEnd){
+        var apptDate=l.appointment_date?new Date(l.appointment_date+'T12:00:00'):null;
+        if(cutoff&&(!apptDate||apptDate<cutoff))return false;
+        if(cutoffEnd&&(!apptDate||apptDate>cutoffEnd))return false;
+      }
       if(doctor&&l.doctor!==doctor)return false;
       if(secretary&&l.secretary!==secretary)return false;
       if(status&&l.lead_status!==status)return false;
