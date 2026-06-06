@@ -1,4 +1,4 @@
-<!-- build: 1780756454 -->
+<!-- build: 1780771559 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -3338,7 +3338,7 @@ async function loadAppointments(){
   if(!isDoctorOnly){
     var isAdmin=currentRole==='admin'||(currentProfile&&currentProfile.roles&&currentProfile.roles.includes('admin'));
     // מזכירה רואה רק את עצמה; ADMIN רואה הכל
-    var mySecName=currentProfile&&currentProfile.name?currentProfile.name:(currentProfile&&currentProfile.email?currentProfile.email.split('@')[0]:'');
+    var mySecName=currentProfile.display_name||currentProfile.full_name||currentProfile.name||(currentProfile.email?currentProfile.email.split('@')[0]:'');
     var secKeysFiltered=Object.keys(secStats).filter(function(s){
       if(s==="לא מוגדר"||!secStats[s].leads)return false;
       if(isAdmin)return true;
@@ -3363,7 +3363,7 @@ async function loadAppointments(){
   var secTbl=document.getElementById('sec-perf-body');
   if(secTbl){
     var isAdmin2=currentRole==='admin'||(currentProfile&&currentProfile.roles&&currentProfile.roles.includes('admin'));
-    var mySecName2=currentProfile&&currentProfile.name?currentProfile.name:(currentProfile&&currentProfile.email?currentProfile.email.split('@')[0]:'');
+    var mySecName2=currentProfile.display_name||currentProfile.full_name||currentProfile.name||(currentProfile.email?currentProfile.email.split('@')[0]:'');
     var secKeys3=Object.keys(secStats).filter(function(s){
       if(s==='לא מוגדר'||!secStats[s].leads)return false;
       if(isAdmin2)return true;
