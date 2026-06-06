@@ -1,4 +1,4 @@
-<!-- build: 1780775669 -->
+<!-- build: 1780776153 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -417,7 +417,7 @@ textarea.form-control{resize:vertical;min-height:65px}
 
     <!-- רופא עם חיפוש לפי שם/תחום -->
     <div class="form-group" style="margin-bottom:10px">
-      <label>רופא מבוקש</label>
+      <label>רופא מבוקש <span style="color:#c62828">*</span></label>
       <div style="position:relative">
         <input class="form-control" id="lf-doctor-search" placeholder="חפש לפי שם או תחום (אורתופד, קרדיולוג...)" oninput="searchDoctorInput(this.value)" onfocus="searchDoctorInput(this.value||' ')" onblur="setTimeout(function(){var b=document.getElementById('doctor-suggest');if(b)b.style.display='none';},200)" autocomplete="off" />
         <div id="doctor-suggest" class="suggest-box" style="display:none;top:100%;right:0;z-index:300;max-height:260px;overflow-y:auto"></div>
@@ -1943,10 +1943,10 @@ async function onPhoneInput(val){
   if(qs('lf-id').value){qs('phone-suggest').style.display='none';return;}
   if(clean.length<7){qs('phone-suggest').style.display='none';return;}
   // Search both with and without dash
-  // הצג הצעות רק כשיש התאמה מלאה של הטלפון (לא חלקית)
+  // הצג הצעות בזמן הקלדה — התאמה מתחילת המספר
   const matches=allLeads.filter(function(l){
     var lp=(l.phone||'').replace(/[-\s]/g,'');
-    return lp===clean||(lp.length===10&&clean.length>=9&&lp.startsWith(clean));
+    return lp.startsWith(clean)||(clean.length>=10&&lp===clean);
   }).slice(0,5);
   if(matches.length){
     qs('phone-suggest').style.display='block';
@@ -1954,12 +1954,15 @@ async function onPhoneInput(val){
       return'<div class="suggest-item" onclick="fillFromLead(\''+m.id+'\')">'+( m.full_name||'—')+' – '+(m.phone||'')+' – '+(m.doctor||'—')+'</div>';
     }).join('');
   } else qs('phone-suggest').style.display='none';
-  // Trigger returning customer popup when phone is complete
-  if(clean.length>=9) await checkReturningCustomer(clean);
-  // הסתר הצעות אם הטלפון הושלם ונמצא התאמה מדויקת
-  if(clean.length===10&&matches.length===1&&(matches[0].phone||'').replace(/[-\s]/g,'')===clean){
-    qs('phone-suggest').style.display='none';
-    showPatientHistory(matches[0]);
+  // כשהמספר שלם (10 ספרות) ויש התאמה מדויקת — הצג היסטוריית מטופל
+  if(clean.length>=10){
+    var exactMatch=allLeads.find(function(l){
+      return (l.phone||'').replace(/[-\s]/g,'')===clean;
+    });
+    if(exactMatch){
+      qs('phone-suggest').style.display='none';
+      showPatientHistory(exactMatch);
+    }
   }
 }
 function fillFromLead(id){
@@ -2051,6 +2054,8 @@ async function saveLead(){
   const fn=qs('lf-firstname').value.trim(),ln=qs('lf-lastname').value.trim();
   const dateVal=qs('lf-date').value,timeVal=qs('lf-time').value;
   const phone=qs('lf-phone').value.trim().replace(/[-\s]/g,'');
+  // פורמט טלפון אוטומטי: XXX-XXXXXXX
+  var phoneFormatted=phone.length===10?phone.slice(0,3)+'-'+phone.slice(3):phone;
   const secretary=qs('lf-secretary').value.trim();
   const status=qs('lf-status').value;
   if(!dateVal){showToast('נא למלא תאריך קבלת ליד');return;}
@@ -2120,7 +2125,7 @@ async function saveLead(){
     finalNotes=finalNotes?finalNotes+'\n\n'+cancelNote:cancelNote;
   }
   const payload={
-    insurance_flag:insuranceFlagActive,full_name:(fn+' '+ln).trim(),phone,
+    insurance_flag:insuranceFlagActive,full_name:(fn+' '+ln).trim(),phone:phoneFormatted,
     age:qs('lf-age').value?Number(qs('lf-age').value):null,
     city:qs('lf-city').value.trim()||null,
     kupat_holim:qs('lf-kupat-holim').value||null,
