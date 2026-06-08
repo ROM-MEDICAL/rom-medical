@@ -1,4 +1,4 @@
-<!-- build: 1780922242 -->
+<!-- build: 1780923735 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -767,6 +767,52 @@ function switchFollowupTab(which){
   if(tm){tm.style.color=isMine?'#e65100':'#9e9e9e';tm.style.borderBottom='2px solid '+(isMine?'#e65100':'transparent');}
   if(ta){ta.style.color=isMine?'#9e9e9e':'#e65100';ta.style.borderBottom='2px solid '+(isMine?'transparent':'#e65100');}
 }
+// בניית כרטיס "דורשים המשך טיפול" — משמש גם מזכירה (שלי+כל המרפאה) וגם אדמין (כל המרפאה)
+function loadFollowupCard(opts){
+  var holder=opts.holder;if(!holder)return;
+  var padF=function(n){return n<10?'0'+n:''+n;};
+  var nowF=new Date();
+  var todayF=nowF.getFullYear()+'-'+padF(nowF.getMonth()+1)+'-'+padF(nowF.getDate());
+  db.from('leads').select('id,full_name,phone,return_date,secretary,notes')
+    .eq('lead_status','נדרש המשך טיפול')
+    .or('return_date.is.null,return_date.lte.'+todayF)
+    .neq('cancelled',true)
+    .order('return_date',{nullsFirst:true})
+    .limit(200)
+    .then(function(res){
+      var rows=res.data||[];
+      var mine=rows.filter(function(l){return (l.secretary||'')===opts.myName;});
+      function renderRows(arr,emptyMsg,showSec){
+        if(!arr.length)return '<div style="color:#9e9e9e;font-size:12px;text-align:center;padding:8px">'+emptyMsg+'</div>';
+        var h='<div style="max-height:160px;overflow-y:auto">';
+        arr.forEach(function(l){
+          h+='<div style="display:flex;justify-content:space-between;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px;cursor:pointer" onclick="openLeadEdit(\''+l.id+'\')">';
+          h+='<span style="font-weight:600">'+l.full_name+(showSec&&l.secretary?' <span style="color:#9e9e9e;font-weight:400">· '+l.secretary+'</span>':'')+'</span>';
+          h+='<span style="color:#e65100;font-size:11px">'+( l.return_date?new Date(l.return_date).toLocaleDateString('he-IL'):'')+ '</span></div>';
+        });
+        h+='</div>';return h;
+      }
+      var card='<div class="card" style="padding:14px">';
+      if(opts.showMineTab){
+        var mineActive=opts.defaultTab!=='all';
+        var tabBtn=function(id,tab,label,active){
+          return '<button id="'+id+'" onclick="switchFollowupTab(\''+tab+'\')" style="flex:1;border:none;background:none;cursor:pointer;padding:6px 4px;font-size:12px;font-weight:700;color:'+(active?'#e65100':'#9e9e9e')+';border-bottom:2px solid '+(active?'#e65100':'transparent')+'">'+label+'</button>';
+        };
+        card+='<div style="font-size:11px;font-weight:700;color:#e65100;margin-bottom:6px">🔔 דורשים המשך טיפול</div>';
+        card+='<div style="display:flex;gap:4px;margin-bottom:8px;border-bottom:1px solid #ffe0b2">';
+        card+=tabBtn('fu-tab-mine','mine','שלי ('+mine.length+')',mineActive);
+        card+=tabBtn('fu-tab-all','all','כל המרפאה ('+rows.length+')',!mineActive);
+        card+='</div>';
+        card+='<div id="fu-list-mine" style="display:'+(mineActive?'block':'none')+'">'+renderRows(mine,'אין לידים שלך הדורשים טיפול כעת',false)+'</div>';
+        card+='<div id="fu-list-all" style="display:'+(mineActive?'none':'block')+'">'+renderRows(rows,'אין לידים הדורשים טיפול כעת',true)+'</div>';
+      } else {
+        card+='<div style="font-size:11px;font-weight:700;color:#e65100;margin-bottom:8px;border-bottom:1px solid #ffe0b2;padding-bottom:5px">🔔 דורשים המשך טיפול — כל המרפאה ('+rows.length+')</div>';
+        card+=renderRows(rows,'אין לידים הדורשים טיפול כעת',true);
+      }
+      card+='</div>';
+      holder.innerHTML=card;
+    });
+}
 async function loadDashboard(){
   const td=today();
   await loadAllUsers();
@@ -990,6 +1036,18 @@ async function loadDashboard(){
       });
   }
 
+  // --- אדמין (כולל רופא+אדמין / אדמין בלבד): דורשים המשך טיפול — כל המרפאה ---
+  if(isAdmin&&!isSecretary){
+    var admExtra=document.getElementById('dash-admin-followup');
+    if(!admExtra){
+      admExtra=document.createElement('div');admExtra.id='dash-admin-followup';
+      admExtra.style.cssText='margin-top:12px';
+      var dashTasksA=qs('dash-tasks');
+      if(dashTasksA&&dashTasksA.parentNode){dashTasksA.parentNode.appendChild(admExtra);}
+    }
+    loadFollowupCard({myName:myName,defaultTab:'all',showMineTab:false,holder:admExtra});
+  }
+
   // --- מזכירה: לידים הדורשים המשך טיפול + תורים למחר ---
   if(isSecretary&&!isDoctorOnly&&!isDoctorAdmin){
     var secExtra=document.getElementById('dash-sec-extra');
@@ -1001,41 +1059,9 @@ async function loadDashboard(){
     }
 
     // לידים הדורשים המשך טיפול — לשונית "שלי" / "כל המרפאה"
-    db.from('leads').select('id,full_name,phone,return_date,secretary,notes')
-      .eq('lead_status','נדרש המשך טיפול')
-      .or('return_date.is.null,return_date.lte.'+todayStr3)
-      .neq('cancelled',true)
-      .order('return_date',{nullsFirst:true})
-      .limit(100)
-      .then(function(res){
-        var rows=res.data||[];
-        var mine=rows.filter(function(l){return (l.secretary||'')===myName;});
-        function renderRows(arr,emptyMsg,showSec){
-          if(!arr.length)return '<div style="color:#9e9e9e;font-size:12px;text-align:center;padding:8px">'+emptyMsg+'</div>';
-          var h='<div style="max-height:160px;overflow-y:auto">';
-          arr.forEach(function(l){
-            h+='<div style="display:flex;justify-content:space-between;padding:5px 4px;border-bottom:1px solid #f5f5f5;font-size:12px;cursor:pointer" onclick="openLeadEdit(\''+l.id+'\')">';
-            h+='<span style="font-weight:600">'+l.full_name+(showSec&&l.secretary?' <span style="color:#9e9e9e;font-weight:400">· '+l.secretary+'</span>':'')+'</span>';
-            h+='<span style="color:#e65100;font-size:11px">'+( l.return_date?new Date(l.return_date).toLocaleDateString('he-IL'):'')+ '</span></div>';
-          });
-          h+='</div>';return h;
-        }
-        function tabBtn(id,tab,label,active){
-          return '<button id="'+id+'" onclick="switchFollowupTab(\''+tab+'\')" style="flex:1;border:none;background:none;cursor:pointer;padding:6px 4px;font-size:12px;font-weight:700;color:'+(active?'#e65100':'#9e9e9e')+';border-bottom:2px solid '+(active?'#e65100':'transparent')+'">'+label+'</button>';
-        }
-        var card='<div class="card" style="padding:14px">';
-        card+='<div style="font-size:11px;font-weight:700;color:#e65100;margin-bottom:6px">🔔 דורשים המשך טיפול</div>';
-        card+='<div style="display:flex;gap:4px;margin-bottom:8px;border-bottom:1px solid #ffe0b2">';
-        card+=tabBtn('fu-tab-mine','mine','שלי ('+mine.length+')',true);
-        card+=tabBtn('fu-tab-all','all','כל המרפאה ('+rows.length+')',false);
-        card+='</div>';
-        card+='<div id="fu-list-mine">'+renderRows(mine,'אין לידים שלך הדורשים טיפול כעת',false)+'</div>';
-        card+='<div id="fu-list-all" style="display:none">'+renderRows(rows,'אין לידים הדורשים טיפול כעת',true)+'</div>';
-        card+='</div>';
-        var followEl=document.getElementById('dash-followup');
-        if(!followEl){followEl=document.createElement('div');followEl.id='dash-followup';secExtra.appendChild(followEl);}
-        followEl.innerHTML=card;
-      });
+    var followEl=document.getElementById('dash-followup');
+    if(!followEl){followEl=document.createElement('div');followEl.id='dash-followup';secExtra.appendChild(followEl);}
+    loadFollowupCard({myName:myName,defaultTab:'mine',showMineTab:true,holder:followEl});
 
     // תורים למחר — לאשר הגעה
     db.from('leads').select('full_name,phone,appointment_time,doctor,lead_status')
