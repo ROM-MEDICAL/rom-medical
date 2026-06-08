@@ -1,4 +1,4 @@
-<!-- build: 1780932467 -->
+<!-- build: 1780934831 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -5008,6 +5008,17 @@ async function handleTipulogUpload(input){
 
       // נרמול שם רופא להשוואה (הסרת "ד"ר" וסוגריים)
       function normDoc(s){return normName((s||'').replace(/ד"ר/g,'').split('(')[0]);}
+      // מרחק עריכה (Levenshtein) לזיהוי שינויי-אות בשם
+      function lev(a,b){
+        a=a||'';b=b||'';var m=a.length,n=b.length;if(!m)return n;if(!n)return m;
+        var dp=[];for(var x=0;x<=n;x++)dp[x]=x;
+        for(var ii=1;ii<=m;ii++){var prev=dp[0];dp[0]=ii;
+          for(var jj=1;jj<=n;jj++){var tmp=dp[jj];
+            dp[jj]=a[ii-1]===b[jj-1]?prev:1+Math.min(prev,dp[jj],dp[jj-1]);prev=tmp;}}
+        return dp[n];
+      }
+      // התאמת מילה: זהה או מרחק עריכה ≤1 (תופס שינוי אות בודד)
+      function wordMatch(w,arr){return arr.some(function(x){return x===w||(w.length>=3&&x.length>=3&&lev(x,w)<=1);});}
       // הפרש ימים: leadDate - tipulogDate
       function dateDiffDays(leadDate,tipDate){
         if(!leadDate||!tipDate)return 9999;
@@ -5036,14 +5047,15 @@ async function handleTipulogUpload(input){
           return sameDate||sameDoc;
         });
         if(a)return {lead:a,tier:'A'};
-        // רמה B: שם זהה ללא אישוש / שם חלקי (2+ מילים) / פרטי+משפחה מוכלים
+        // רמה B: שם זהה ללא אישוש / שם דומה (התאמת מילים עם סבילות לשינוי-אות)
         var b=cands.find(function(l){
           var lNorm=normName(l.full_name);
           if(lNorm===impNorm)return true;
           var lParts=lNorm.split(' ').filter(function(w){return w.length>1;});
-          var shared=impParts.filter(function(w){return lParts.includes(w);}).length;
+          var shared=impParts.filter(function(w){return wordMatch(w,lParts);}).length;
           if(shared>=2)return true;
-          if(fn&&ln&&lNorm.includes(fn)&&lNorm.includes(ln))return true;
+          if(impParts.length<=1&&shared>=1)return true; // שם בעל מילה אחת
+          if(fn&&ln&&(lNorm.includes(fn)||wordMatch(fn,lParts))&&(lNorm.includes(ln)||wordMatch(ln,lParts)))return true;
           return false;
         });
         if(b)return {lead:b,tier:'B'};
