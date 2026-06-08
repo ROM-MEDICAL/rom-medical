@@ -1,4 +1,4 @@
-<!-- build: 1780929990 -->
+<!-- build: 1780932467 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -4979,17 +4979,22 @@ async function handleTipulogUpload(input){
       // קבל טווח תאריכים
       var dates=importRows.map(r=>r.date).filter(Boolean).sort();
       var minDate=dates[0],maxDate=dates[dates.length-1];
+      // מאגר השוואה מורחב: עד 14 יום קדימה (לזיהוי תור שהוקדם שלא עודכן)
+      var _mp=function(n){return n<10?'0'+n:''+n;};
+      var _maxPlus=new Date(maxDate+'T00:00:00');_maxPlus.setDate(_maxPlus.getDate()+14);
+      var maxDatePlus14=_maxPlus.getFullYear()+'-'+_mp(_maxPlus.getMonth()+1)+'-'+_mp(_maxPlus.getDate());
 
       resultEl.innerHTML='<p style="color:#757575;padding:12px">מנתח נתונים קיימים... ('+importRows.length+' שורות, '+minDate+' עד '+maxDate+')</p>';
 
-      // שלוף לידים קיימים בטווח
+      // שלוף לידים קיימים בטווח (כולל 14 יום קדימה לזיהוי תור שהוקדם)
       var[{data:existingLeads},{data:existingAppts}]=await Promise.all([
-        db.from('leads').select('id,full_name,phone,appointment_date,appointment_time,doctor,appointment_done,cancelled,lead_status,source').gte('appointment_date',minDate).lte('appointment_date',maxDate),
+        db.from('leads').select('id,full_name,phone,appointment_date,appointment_time,doctor,appointment_done,cancelled,lead_status,source,deduction_amount,secretary').gte('appointment_date',minDate).lte('appointment_date',maxDatePlus14),
         db.from('appointments').select('id,patient_name,date,doctor,deduction_amount,status,lead_id').eq('status','done').gte('date',minDate).lte('date',maxDate)
       ]);
 
       // ניתוח — מה יקרה
-      var toConfirm=[],toCreate=[],toCancel=[],conflicts=[],missingPhone=[];
+      var toConfirm=[],toReview=[],toCreate=[],toCancel=[],conflicts=[],missingPhone=[];
+      var matchedLeadIds={}; // לידים שהותאמו (לא לבטל אותם)
 
       // פונקציית נרמול שם להשוואה
       function normName(s){
@@ -5001,67 +5006,73 @@ async function handleTipulogUpload(input){
           .toLowerCase();
       }
 
-      // מציאת ליד לפי שם + תאריך, עם fallback לשם חלקי
-      function findLead(imp, leads){
+      // נרמול שם רופא להשוואה (הסרת "ד"ר" וסוגריים)
+      function normDoc(s){return normName((s||'').replace(/ד"ר/g,'').split('(')[0]);}
+      // הפרש ימים: leadDate - tipulogDate
+      function dateDiffDays(leadDate,tipDate){
+        if(!leadDate||!tipDate)return 9999;
+        var a=new Date(String(leadDate).slice(0,10)+'T00:00:00');
+        var b=new Date(String(tipDate).slice(0,10)+'T00:00:00');
+        return Math.round((a-b)/86400000);
+      }
+      // מנוע התאמה מדורג — מחזיר {lead, tier:'A'|'B'} או null
+      // A = ודאי (אישור אוטומטי) | B = לא ודאי (דורש אישור ידני) | null = אין התאמה (צור חדש)
+      function findLeadV2(imp, leads){
         var impNorm=normName(imp.full_name);
         var impParts=impNorm.split(' ').filter(function(w){return w.length>1;});
-        // 1. match מדויק: שם + תאריך
-        var exact=leads.find(function(l){
-          return normName(l.full_name)===impNorm && l.appointment_date===imp.date && !l.cancelled;
+        var impDoc=normDoc(imp.doctor);
+        var fn=normName(imp.first_name),ln=normName(imp.last_name);
+        // מועמדים: לא מבוטלים, תאריך תור == תאריך הטיפולוג או עד 14 יום אחריו (תור שהוקדם)
+        var cands=leads.filter(function(l){
+          if(l.cancelled)return false;
+          var diff=dateDiffDays(l.appointment_date,imp.date);
+          return diff>=0&&diff<=14;
         });
-        if(exact)return exact;
-        // 2. match חלקי: לפחות 2 מילים + אותו תאריך
-        var partial=leads.find(function(l){
-          if(l.appointment_date!==imp.date||l.cancelled)return false;
+        // רמה A: שם זהה + (תאריך מדויק או אותו רופא)
+        var a=cands.find(function(l){
+          if(normName(l.full_name)!==impNorm)return false;
+          var sameDate=(String(l.appointment_date).slice(0,10)===imp.date);
+          var sameDoc=impDoc&&normDoc(l.doctor)===impDoc;
+          return sameDate||sameDoc;
+        });
+        if(a)return {lead:a,tier:'A'};
+        // רמה B: שם זהה ללא אישוש / שם חלקי (2+ מילים) / פרטי+משפחה מוכלים
+        var b=cands.find(function(l){
           var lNorm=normName(l.full_name);
+          if(lNorm===impNorm)return true;
           var lParts=lNorm.split(' ').filter(function(w){return w.length>1;});
           var shared=impParts.filter(function(w){return lParts.includes(w);}).length;
-          return shared>=2;
+          if(shared>=2)return true;
+          if(fn&&ln&&lNorm.includes(fn)&&lNorm.includes(ln))return true;
+          return false;
         });
-        if(partial)return partial;
-        // 3. match שם + תאריך (קרוב ±3 ימים)
-        var firstNorm=normName(imp.first_name);
-        var lastNorm=normName(imp.last_name);
-        var byName=leads.find(function(l){
-          if(l.appointment_date!==imp.date||l.cancelled)return false;
-          var lNorm=normName(l.full_name);
-          return lNorm.includes(firstNorm)&&lNorm.includes(lastNorm);
-        });
-        if(byName)return byName;
-        // 4. ★ חדש: ליד סגור עם אותו טלפון (ללא תאריך תור)
-        if(imp.phone){
-          var normPh=imp.phone.replace(/[^0-9]/g,'').slice(-10);
-          var byPhone=leads.find(function(l){
-            if(l.cancelled)return false;
-            if(l.lead_status!=='הליד נסגר')return false;
-            var lPh=(l.phone||'').replace(/[^0-9]/g,'').slice(-10);
-            return lPh===normPh;
-          });
-          if(byPhone)return byPhone;
-        }
-        // 5. ★ חדש: שם זהה בלי קשר לתאריך (ליד סגור)
-        var byNameClosed=leads.find(function(l){
+        if(b)return {lead:b,tier:'B'};
+        // ליד סגור עם שם זהה (ללא קשר לתאריך) → דורש אישור
+        var closed=leads.find(function(l){
           if(l.cancelled||l.lead_status!=='הליד נסגר')return false;
-          var lNorm=normName(l.full_name);
-          return lNorm===impNorm;
+          return normName(l.full_name)===impNorm;
         });
-        return byNameClosed||null;
+        if(closed)return {lead:closed,tier:'B'};
+        return null;
       }
 
       // בדוק כל שורה מהקובץ
       importRows.forEach(function(imp){
-        var match=findLead(imp, existingLeads||[]);
-        if(match){
-          // בדוק סתירה עם ייבוא קודם
-          var prevAppt=(existingAppts||[]).find(function(a){
-            return a.lead_id===match.id&&a.status==='done';
-          });
-          if(prevAppt&&prevAppt.deduction_amount!==imp.price&&match.source==='tipulog'){
-            conflicts.push({lead:match,appt:prevAppt,imp:imp,type:'price_conflict'});
+        var m=findLeadV2(imp, existingLeads||[]);
+        if(m&&m.tier==='A'){
+          matchedLeadIds[m.lead.id]=true;
+          var moved=(String(m.lead.appointment_date).slice(0,10)!==imp.date);
+          // בדוק סתירת מחיר מול ייבוא קודם
+          var prevAppt=(existingAppts||[]).find(function(a){return a.lead_id===m.lead.id&&a.status==='done';});
+          if(prevAppt&&prevAppt.deduction_amount!==imp.price&&m.lead.source==='טיפולוג'){
+            conflicts.push({lead:m.lead,appt:prevAppt,imp:imp,type:'price_conflict'});
           } else {
-            var matchType=match.lead_status==='הליד נסגר'?'closed':'active';
-            toConfirm.push({lead:match,imp:imp,matchType:matchType});
+            var matchType=m.lead.lead_status==='הליד נסגר'?'closed':'active';
+            toConfirm.push({lead:m.lead,imp:imp,matchType:matchType,moved:moved});
           }
+        } else if(m&&m.tier==='B'){
+          matchedLeadIds[m.lead.id]=true;
+          toReview.push({lead:m.lead,imp:imp});
         } else {
           toCreate.push({imp:imp});
           if(!imp.phone)missingPhone.push(imp);
@@ -5073,10 +5084,13 @@ async function handleTipulogUpload(input){
       var _nowImp=new Date();
       var _padImp=function(n){return n<10?'0'+n:''+n;};
       var importTodayStr=_nowImp.getFullYear()+'-'+_padImp(_nowImp.getMonth()+1)+'-'+_padImp(_nowImp.getDate());
+      var _dstr=function(d){return d?String(d).slice(0,10):'';};
       (existingLeads||[]).forEach(function(l){
+        if(matchedLeadIds[l.id])return; // הותאם (A/B) — לא לבטל
         if(l.cancelled||l.lead_status==='בוטל')return;
         if(l.appointment_done)return; // כבר אושר ידנית — לא נבטל
-        if(l.appointment_date&&l.appointment_date>=importTodayStr)return; // ★ היום הנוכחי/עתידי — לא סופי, לא לבטל
+        var leadDate=_dstr(l.appointment_date);
+        if(leadDate&&leadDate>=importTodayStr)return; // ★ היום הנוכחי/עתידי — לא סופי, לא לבטל
         var found=importRows.find(function(imp){
           // אותו matching דו-כיווני
           var impNorm=normName(imp.full_name);
@@ -5106,7 +5120,7 @@ async function handleTipulogUpload(input){
         return !found;
       });
       // הצג תוצאות ניתוח
-      showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,confirmedNotInTipulog,importRows,minDate,maxDate);
+      showImportPreview(toConfirm,toReview,toCreate,toCancel,conflicts,missingPhone,confirmedNotInTipulog,importRows,minDate,maxDate);
 
     } catch(err){
       resultEl.innerHTML='<p style="color:#e53935">שגיאה בקריאת הקובץ: '+err.message+'</p>';
@@ -5115,7 +5129,7 @@ async function handleTipulogUpload(input){
   reader.readAsArrayBuffer(file);
 }
 
-function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,confirmedNotInTipulog,importRows,minDate,maxDate){
+function showImportPreview(toConfirm,toReview,toCreate,toCancel,conflicts,missingPhone,confirmedNotInTipulog,importRows,minDate,maxDate){
   var el=document.getElementById('tipulog-import-result');
   if(!el)return;
 
@@ -5123,12 +5137,34 @@ function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,co
   html+='<div style="font-size:15px;font-weight:700;color:#4f46e5;margin-bottom:16px">📊 תוצאות ניתוח — '+minDate+' עד '+maxDate+'</div>';
 
   // כרטיסי סיכום
-  html+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">';
+  html+='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px">';
   html+='<div style="background:#e8f5e9;border:1.5px solid #43a047;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#1b5e20">'+toConfirm.length+'</div><div style="font-size:11px;color:#43a047">יאושרו</div></div>';
+  html+='<div style="background:'+(toReview.length?'#fff8e1':'#f5f5f5')+';border:1.5px solid '+(toReview.length?'#ffa000':'#90a4ae')+';border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:'+(toReview.length?'#e65100':'#757575')+'">'+toReview.length+'</div><div style="font-size:11px">דורשים אישור</div></div>';
   html+='<div style="background:#e3f2fd;border:1.5px solid #1976d2;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#0d47a1">'+toCreate.length+'</div><div style="font-size:11px;color:#1976d2">ייווצרו חדשים</div></div>';
   html+='<div style="background:#fce4ec;border:1.5px solid #e91e63;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#880e4f">'+toCancel.length+'</div><div style="font-size:11px;color:#e91e63">יבוטלו</div></div>';
   html+='<div style="background:'+(conflicts.length?'#fce4ec':'#f5f5f5')+';border:1.5px solid '+(conflicts.length?'#e91e63':'#90a4ae')+';border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:'+(conflicts.length?'#880e4f':'#757575')+'">'+conflicts.length+'</div><div style="font-size:11px">סתירות</div></div>';
   html+='</div>';
+
+  // דורשים אישור — התאמות לא ודאיות (איחוד או דחייה)
+  if(toReview.length){
+    html+='<div style="background:#fff8e1;border:1.5px solid #ffa000;border-radius:8px;padding:14px;margin-bottom:14px">';
+    html+='<div style="font-weight:700;color:#e65100;margin-bottom:4px">⚠️ '+toReview.length+' התאמות דורשות אישור — האם זה אותו מטופל?</div>';
+    html+='<div style="font-size:11px;color:#9e9e9e;margin-bottom:10px">אישור = איחוד על הליד הקיים (טיפולוג גובר, חוסרים נשמרים). דחייה = יצירת ליד חדש + ביטול המועמד.</div>';
+    toReview.forEach(function(r,i){
+      var lDoc=(r.lead.doctor||'—').replace(/ד"ר /,'').split('(')[0].trim();
+      var iDoc=(r.imp.doctor||'—').replace(/ד"ר /,'').split('(')[0].trim();
+      html+='<div style="background:#fff;border-radius:6px;padding:10px;margin-bottom:8px;font-size:12px">';
+      html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">';
+      html+='<div style="border-left:1px solid #eee;padding-left:8px"><div style="font-size:10px;color:#9e9e9e">טיפולוג (חדש)</div><div style="font-weight:600">'+r.imp.full_name+'</div><div style="color:#555">'+r.imp.date+' '+(r.imp.time||'')+' · '+iDoc+' · ₪'+r.imp.price+'</div></div>';
+      html+='<div><div style="font-size:10px;color:#9e9e9e">ליד קיים</div><div style="font-weight:600">'+r.lead.full_name+'</div><div style="color:#555">'+(r.lead.appointment_date||'—')+' · '+lDoc+' · '+(r.lead.lead_status||'')+'</div></div>';
+      html+='</div>';
+      html+='<div style="display:flex;gap:8px">';
+      html+='<label style="flex:1;border:2px solid #e0e0e0;border-radius:6px;padding:6px 8px;cursor:pointer;text-align:center"><input type="radio" name="review_'+i+'" value="merge" onchange="resolveReview('+i+',\'merge\')"> ✓ אותו מטופל (איחוד)</label>';
+      html+='<label style="flex:1;border:2px solid #e0e0e0;border-radius:6px;padding:6px 8px;cursor:pointer;text-align:center"><input type="radio" name="review_'+i+'" value="reject" onchange="resolveReview('+i+',\'reject\')"> ✗ לא — צור חדש + בטל מועמד</label>';
+      html+='</div></div>';
+    });
+    html+='</div>';
+  }
 
   // סתירות — חייבות יישוב לפני ביצוע
   if(conflicts.length){
@@ -5176,9 +5212,9 @@ function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,co
   }
 
   // כפתור ביצוע
-  var hasUnresolvedConflicts=conflicts.length>0;
+  var hasUnresolved=conflicts.length>0||toReview.length>0;
   html+='<div style="display:flex;gap:10px;margin-top:8px">';
-  html+='<button id="execute-import-btn" class="btn btn-primary" style="flex:2;padding:12px;font-size:14px'+(hasUnresolvedConflicts?';opacity:.4;cursor:not-allowed':'')+'" '+(hasUnresolvedConflicts?'disabled':'')+' onclick="executeImport()">✅ בצע ייבוא ('+importRows.length+' תורים)</button>';
+  html+='<button id="execute-import-btn" class="btn btn-primary" style="flex:2;padding:12px;font-size:14px'+(hasUnresolved?';opacity:.4;cursor:not-allowed':'')+'" '+(hasUnresolved?'disabled':'')+' onclick="executeImport()">✅ בצע ייבוא ('+importRows.length+' תורים)</button>';
   html+='<button class="btn" style="flex:1;padding:12px;background:#f5f5f5;color:#757575;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer" onclick="document.getElementById(\'tipulog-import-result\').innerHTML=\'\'">ביטול</button>';
   html+='</div>';
   html+='</div>';
@@ -5186,16 +5222,24 @@ function showImportPreview(toConfirm,toCreate,toCancel,conflicts,missingPhone,co
   el.innerHTML=html;
 
   // שמור נתונים לביצוע
-  window._importData={toConfirm,toCreate,toCancel,conflicts,missingPhone,resolvedConflicts:{}};
+  window._importData={toConfirm,toReview,toCreate,toCancel,conflicts,missingPhone,resolvedConflicts:{},resolvedReview:{}};
 }
 
 function resolveConflict(idx,choice){
   if(!window._importData)return;
   window._importData.resolvedConflicts[idx]=choice;
-  // בדוק אם כל הסתירות נפתרו
-  var allResolved=window._importData.conflicts.every(function(_,i){
-    return window._importData.resolvedConflicts[i]!==undefined;
-  });
+  _refreshImportBtn();
+}
+function resolveReview(idx,choice){
+  if(!window._importData)return;
+  window._importData.resolvedReview[idx]=choice;
+  _refreshImportBtn();
+}
+function _refreshImportBtn(){
+  var d=window._importData;if(!d)return;
+  var confOk=(d.conflicts||[]).every(function(_,i){return d.resolvedConflicts[i]!==undefined;});
+  var revOk=(d.toReview||[]).every(function(_,i){return d.resolvedReview[i]!==undefined;});
+  var allResolved=confOk&&revOk;
   var btn=document.getElementById('execute-import-btn');
   if(btn){btn.disabled=!allResolved;btn.style.opacity=allResolved?'1':'0.4';btn.style.cursor=allResolved?'pointer':'not-allowed';}
 }
@@ -5231,18 +5275,22 @@ async function executeImport(){
       done++;
     }
 
-    // 2. צור לידים חדשים
-    for(var j=0;j<d.toCreate.length;j++){
-      var imp=d.toCreate[j].imp;
-      var newLead={full_name:imp.full_name,phone:imp.phone||null,doctor:imp.doctor||null,appointment_date:imp.date,appointment_time:imp.time||null,appointment_done:true,appointment_confirmed:true,tipulog_synced:true,deduction_amount:imp.price||null,lead_status:'נקבע תור',source:'טיפולוג',created_at:createdAtStr,original_date:imp.date,return_date:imp.date,secretary:'מרתה'};
+    // helper: יצירת ליד חדש מטיפולוג (מקרה 4) — בעלים "טיפולוג", שעת פנייה/חזרה 23:45
+    var mkLeadFromImp=async function(imp){
+      var newLead={full_name:imp.full_name,phone:imp.phone||null,doctor:imp.doctor||null,appointment_date:imp.date,appointment_time:imp.time||null,appointment_done:true,appointment_confirmed:true,tipulog_synced:true,deduction_amount:imp.price||null,lead_status:'נקבע תור',source:'טיפולוג',created_at:imp.date+'T23:45:00',original_date:imp.date,original_time:'23:45',return_date:imp.date,secretary:'טיפולוג'};
       var leadRes=await db.from('leads').insert(newLead).select('id').single();
       if(leadRes.data){
         await db.from('appointments').insert({patient_name:imp.full_name,patient_phone:imp.phone||'',doctor:imp.doctor||'',date:imp.date,time:imp.time||'00:00',status:'done',deduction_amount:imp.price,lead_id:leadRes.data.id});
-        // משימה אם חסר טלפון
         if(!imp.phone){
           await db.from('tasks').insert({description:'השלמת טלפון למטופל: '+imp.full_name+' (תור: '+imp.date+')',priority:'בינוני',status:'פתוח',patient_name:imp.full_name,from_leads:true,created_at:new Date().toISOString()});
         }
       }
+      return leadRes.data?leadRes.data.id:null;
+    };
+
+    // 2. צור לידים חדשים
+    for(var j=0;j<d.toCreate.length;j++){
+      await mkLeadFromImp(d.toCreate[j].imp);
       done++;
     }
 
@@ -5264,11 +5312,34 @@ async function executeImport(){
       // אם choice==='old' — לא עושים כלום
     }
 
+    // 5. טפל ב"דורשים אישור" שנפתרו
+    var reviewMerged=0,reviewRejected=0;
+    for(var rv=0;rv<(d.toReview||[]).length;rv++){
+      var rc=d.toReview[rv];var rch=d.resolvedReview[rv];
+      if(rch==='merge'){
+        // איחוד על הליד הקיים — טיפולוג גובר, חוסרים (טלפון) נשמרים מהליד
+        var mUpd={appointment_done:true,appointment_confirmed:true,tipulog_synced:true,deduction_amount:rc.imp.price||null,appointment_date:rc.imp.date,appointment_time:rc.imp.time||null,doctor:rc.imp.doctor||rc.lead.doctor||null,phone:rc.imp.phone||rc.lead.phone||null,full_name:rc.imp.full_name||rc.lead.full_name,lead_status:'נקבע תור',cancelled:false};
+        await db.from('leads').update(mUpd).eq('id',rc.lead.id);
+        var exA=(await db.from('appointments').select('id').eq('lead_id',rc.lead.id).eq('status','done')).data;
+        if(exA&&exA.length){await db.from('appointments').update({deduction_amount:rc.imp.price,status:'done'}).eq('id',exA[0].id);}
+        else{await db.from('appointments').insert({patient_name:rc.imp.full_name,patient_phone:rc.lead.phone||'',doctor:rc.imp.doctor||rc.lead.doctor||'',date:rc.imp.date,time:rc.imp.time||'00:00',status:'done',deduction_amount:rc.imp.price,lead_id:rc.lead.id});}
+        reviewMerged++;
+      } else if(rch==='reject'){
+        // צור ליד חדש מהטיפולוג + בטל את המועמד
+        await mkLeadFromImp(rc.imp);
+        await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:'נדחתה התאמה לטיפולוג — נוצר ליד חדש'}).eq('id',rc.lead.id);
+        await db.from('appointments').update({status:'cancelled'}).eq('lead_id',rc.lead.id).eq('status','done');
+        reviewRejected++;
+      }
+      done++;
+    }
+
     // הצג הצלחה
     document.getElementById('tipulog-import-result').innerHTML=
       '<div style="background:#e8f5e9;border:1.5px solid #43a047;border-radius:10px;padding:16px;margin-top:12px;font-size:13px">'
       +'<div style="font-weight:700;font-size:15px;color:#1b5e20;margin-bottom:8px">\u2705 \u05d9\u05d9\u05d1\u05d5\u05d0 \u05d4\u05d5\u05e9\u05dc\u05dd \u05d1\u05d4\u05e6\u05dc\u05d7\u05d4!</div>'
       +'<div>\u05d0\u05d5\u05e9\u05e8\u05d5: '+d.toConfirm.length+' \u05ea\u05d5\u05e8\u05d9\u05dd</div>'
+      +((reviewMerged||reviewRejected)?'<div>\u05d0\u05d5\u05d7\u05d3\u05d5: '+reviewMerged+' / \u05e0\u05d3\u05d7\u05d5 (\u05e0\u05d5\u05e6\u05e8 \u05d7\u05d3\u05e9): '+reviewRejected+'</div>':'')
       +'<div>\u05e0\u05d5\u05e6\u05e8\u05d5: '+d.toCreate.length+' \u05dc\u05d9\u05d3\u05d9\u05dd \u05d7\u05d3\u05e9\u05d9\u05dd</div>'
       +'<div>\u05d1\u05d5\u05d8\u05dc\u05d5: '+d.toCancel.length+' \u05ea\u05d5\u05e8\u05d9\u05dd</div>'
       +(d.missingPhone.length?'<div>\u05e0\u05e4\u05ea\u05d7\u05d5: '+d.missingPhone.length+' \u05de\u05e9\u05d9\u05de\u05d5\u05ea \u05d8\u05dc\u05e4\u05d5\u05df \u05d7\u05e1\u05e8</div>':'')
