@@ -1,4 +1,4 @@
-<!-- build: 1780934831 -->
+<!-- build: 1780936639 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -4983,14 +4983,25 @@ async function handleTipulogUpload(input){
       var _mp=function(n){return n<10?'0'+n:''+n;};
       var _maxPlus=new Date(maxDate+'T00:00:00');_maxPlus.setDate(_maxPlus.getDate()+14);
       var maxDatePlus14=_maxPlus.getFullYear()+'-'+_mp(_maxPlus.getMonth()+1)+'-'+_mp(_maxPlus.getDate());
+      // גבול תחתון: 30 יום לפני התאריך המוקדם בטבלה
+      var _minMinus=new Date(minDate+'T00:00:00');_minMinus.setDate(_minMinus.getDate()-30);
+      var minDateMinus30=_minMinus.getFullYear()+'-'+_mp(_minMinus.getMonth()+1)+'-'+_mp(_minMinus.getDate());
 
       resultEl.innerHTML='<p style="color:#757575;padding:12px">מנתח נתונים קיימים... ('+importRows.length+' שורות, '+minDate+' עד '+maxDate+')</p>';
 
-      // שלוף לידים קיימים בטווח (כולל 14 יום קדימה לזיהוי תור שהוקדם)
-      var[{data:existingLeads},{data:existingAppts}]=await Promise.all([
-        db.from('leads').select('id,full_name,phone,appointment_date,appointment_time,doctor,appointment_done,cancelled,lead_status,source,deduction_amount,secretary').gte('appointment_date',minDate).lte('appointment_date',maxDatePlus14),
+      // שלוף לידים קיימים:
+      //  • מתוארכים (תור פעיל): appointment_date בטווח [המוקדם .. המאוחר+14] — מה שקובע הוא תאריך התור (כולל תור שהוקדם)
+      //  • סגורים (ללא תאריך תור): created_at ב-30 הימים שלפני המוקדם — מטופל חוזר רלוונטי
+      var SEL='id,full_name,phone,appointment_date,appointment_time,doctor,appointment_done,cancelled,lead_status,source,deduction_amount,secretary,created_at';
+      var[{data:rangeLeads},{data:closedLeads},{data:existingAppts}]=await Promise.all([
+        db.from('leads').select(SEL).gte('appointment_date',minDate).lte('appointment_date',maxDatePlus14),
+        db.from('leads').select(SEL).eq('lead_status','הליד נסגר').neq('cancelled',true).gte('created_at',minDateMinus30),
         db.from('appointments').select('id,patient_name,date,doctor,deduction_amount,status,lead_id').eq('status','done').gte('date',minDate).lte('date',maxDate)
       ]);
+      // מאגר התאמה = לידים בטווח + לידים סגורים (ללא כפילויות לפי id)
+      var _seen={};
+      var existingLeads=[];
+      (rangeLeads||[]).concat(closedLeads||[]).forEach(function(l){if(!_seen[l.id]){_seen[l.id]=true;existingLeads.push(l);}});
 
       // ניתוח — מה יקרה
       var toConfirm=[],toReview=[],toCreate=[],toCancel=[],conflicts=[],missingPhone=[];
@@ -5099,10 +5110,12 @@ async function handleTipulogUpload(input){
       var _dstr=function(d){return d?String(d).slice(0,10):'';};
       (existingLeads||[]).forEach(function(l){
         if(matchedLeadIds[l.id])return; // הותאם (A/B) — לא לבטל
-        if(l.cancelled||l.lead_status==='בוטל')return;
+        if(l.cancelled||l.lead_status==='בוטל'||l.lead_status==='הליד נסגר')return; // סגור/מבוטל — לא רלוונטי
         if(l.appointment_done)return; // כבר אושר ידנית — לא נבטל
         var leadDate=_dstr(l.appointment_date);
-        if(leadDate&&leadDate>=importTodayStr)return; // ★ היום הנוכחי/עתידי — לא סופי, לא לבטל
+        if(!leadDate)return; // ללא תאריך תור (ליד סגור) — לא לבטל
+        if(leadDate<minDate||leadDate>maxDate)return; // ★ מחוץ לטווח התאריכים שבקובץ — הקובץ לא טוען עליו דבר
+        if(leadDate>=importTodayStr)return; // ★ היום הנוכחי/עתידי — לא סופי, לא לבטל
         var found=importRows.find(function(imp){
           // אותו matching דו-כיווני
           var impNorm=normName(imp.full_name);
