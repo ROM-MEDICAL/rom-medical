@@ -1,4 +1,4 @@
-<!-- build: 1780924764 -->
+<!-- build: 1780926319 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -4899,6 +4899,27 @@ async function loadAllUsers(){
 // ============================================================
 // ייבוא מטיפולוג
 // ============================================================
+// המרת תאריך מקובץ טיפולוג ל-ISO (YYYY-MM-DD) + שעה, ללא תלות בפורמט מקומי
+function tipulogParseDate(v){
+  function p(n){return n<10?'0'+n:''+n;}
+  if(v==null||v==='')return{date:'',time:''};
+  // מספר סידורי של אקסל (הכי אמין)
+  if(typeof v==='number'){
+    var dc=(typeof XLSX!=='undefined'&&XLSX.SSF)?XLSX.SSF.parse_date_code(v):null;
+    if(dc)return{date:dc.y+'-'+p(dc.m)+'-'+p(dc.d),time:p(dc.H)+':'+p(dc.M)};
+  }
+  // אובייקט Date
+  if(v instanceof Date&&!isNaN(v))return{date:v.getFullYear()+'-'+p(v.getMonth()+1)+'-'+p(v.getDate()),time:p(v.getHours())+':'+p(v.getMinutes())};
+  var s=String(v).trim();
+  // כבר ISO
+  var iso=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(iso)return{date:iso[1]+'-'+iso[2]+'-'+iso[3],time:(s.split(/[ T]/)[1]||'').slice(0,5)};
+  // פורמט M/D/YY או M/D/YYYY (כפי ש-SheetJS מחזיר ב-raw:false)
+  var parts=s.split(' ');
+  var mdy=parts[0].match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(mdy){var yr=+mdy[3];if(yr<100)yr+=2000;return{date:yr+'-'+p(+mdy[1])+'-'+p(+mdy[2]),time:(parts[1]||'').slice(0,5)};}
+  return{date:s,time:''};
+}
 async function handleTipulogUpload(input){
   var resultEl=document.getElementById('tipulog-import-result');
   if(!resultEl)return;
@@ -4915,7 +4936,7 @@ async function handleTipulogUpload(input){
       var data=new Uint8Array(e.target.result);
       var workbook=XLSX.read(data,{type:'array',cellDates:true});
       var sheet=workbook.Sheets[workbook.SheetNames[0]];
-      var rows=XLSX.utils.sheet_to_json(sheet,{raw:false,dateNF:'yyyy-mm-dd'});
+      var rows=XLSX.utils.sheet_to_json(sheet,{raw:true});
 
       if(!rows.length){resultEl.innerHTML='<p style="color:#e53935">הקובץ ריק</p>';return;}
 
@@ -4936,13 +4957,8 @@ async function handleTipulogUpload(input){
       // עבד שורות
       var importRows=[];
       rows.forEach(function(row){
-        var dateRaw=row[dateCol]||'';
-        var date='',time='';
-        if(dateRaw){
-          var parts=String(dateRaw).split(' ');
-          date=parts[0]||'';
-          time=parts[1]?parts[1].slice(0,5):'';
-        }
+        var pd=tipulogParseDate(row[dateCol]);
+        var date=pd.date,time=pd.time;
         var first=String(row[firstCol]||'').trim();
         var last=String(row[lastCol]||'').trim();
         if(!first||!last||!date)return;
