@@ -1,4 +1,4 @@
-<!-- build: 1781000304 -->
+<!-- build: 1781011985 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -5013,7 +5013,7 @@ async function handleTipulogUpload(input){
       // שלוף לידים קיימים:
       //  • מתוארכים (תור פעיל): appointment_date בטווח [המוקדם .. המאוחר+14] — מה שקובע הוא תאריך התור (כולל תור שהוקדם)
       //  • סגורים (ללא תאריך תור): created_at ב-30 הימים שלפני המוקדם — מטופל חוזר רלוונטי
-      var SEL='id,full_name,phone,appointment_date,appointment_time,doctor,appointment_done,cancelled,lead_status,source,deduction_amount,secretary,created_at';
+      var SEL='id,full_name,phone,appointment_date,appointment_time,doctor,appointment_done,cancelled,lead_status,source,deduction_amount,secretary,created_at,notes';
       var[{data:rangeLeads},{data:closedLeads},{data:existingAppts}]=await Promise.all([
         db.from('leads').select(SEL).gte('appointment_date',minDate).lte('appointment_date',maxDatePlus14),
         db.from('leads').select(SEL).eq('lead_status','הליד נסגר').neq('cancelled',true).gte('created_at',minDateMinus30),
@@ -5356,6 +5356,11 @@ async function executeImport(){
   var createdAtStr=createdAt.toISOString();
   var errors=[];
   var done=0;
+  // חותם הערות לפעולות הייבוא
+  var _who=(typeof currentProfile!=='undefined'&&currentProfile)?(currentProfile.display_name||currentProfile.full_name||'מערכת'):'מערכת';
+  var _ds=now.toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric'});
+  var _ts=now.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  function _stampNote(existing,text){var line='['+_ds+' '+_ts+' | '+_who+'] '+text;return existing?existing+'\n'+line:line;}
 
   try{
     // 1. אשר תורים קיימים
@@ -5401,10 +5406,10 @@ async function executeImport(){
       var cd=(d.resolvedCancel&&d.resolvedCancel[k])||{action:'cancel'};
       if(cd.action==='postpone'&&cd.date){
         // נדחה — קבע תאריך תור חדש, הליד נשאר פעיל
-        await db.from('leads').update({appointment_date:cd.date,lead_status:'נקבע תור',cancelled:false,appointment_done:false,appointment_confirmed:false,cancel_reason:null}).eq('id',lead.id);
+        await db.from('leads').update({appointment_date:cd.date,lead_status:'נקבע תור',cancelled:false,appointment_done:false,appointment_confirmed:false,cancel_reason:null,notes:_stampNote(lead.notes,'נדחה (ייבוא טיפולוג): '+(lead.appointment_date?String(lead.appointment_date).slice(0,10):'—')+' → '+cd.date)}).eq('id',lead.id);
         postponed++;
       } else {
-        await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:'לא מופיע בייבוא טיפולוג'}).eq('id',lead.id);
+        await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:'לא מופיע בייבוא טיפולוג',notes:_stampNote(lead.notes,'בוטל (ייבוא טיפולוג): לא נמצא בטבלה')}).eq('id',lead.id);
         await db.from('appointments').update({status:'cancelled'}).eq('lead_id',lead.id).eq('status','done');
         cancelled++;
       }
@@ -5451,11 +5456,11 @@ async function executeImport(){
       var cdec=(d.resolvedConfirmed&&d.resolvedConfirmed[ci])||{action:'cancel'};
       if(cdec.action==='leave')continue;
       if(cdec.action==='postpone'&&cdec.date){
-        await db.from('leads').update({appointment_date:cdec.date,lead_status:'נקבע תור',cancelled:false,appointment_done:false,appointment_confirmed:false,deduction_amount:null,cancel_reason:null}).eq('id',cl.id);
+        await db.from('leads').update({appointment_date:cdec.date,lead_status:'נקבע תור',cancelled:false,appointment_done:false,appointment_confirmed:false,deduction_amount:null,cancel_reason:null,notes:_stampNote(cl.notes,'נדחה (אומת אך לא בטיפולוג): '+(cl.appointment_date?String(cl.appointment_date).slice(0,10):'—')+' → '+cdec.date)}).eq('id',cl.id);
         await db.from('appointments').update({status:'cancelled'}).eq('lead_id',cl.id).eq('status','done');
         cnitPostponed++;
       } else {
-        await db.from('leads').update({cancelled:true,lead_status:'בוטל',appointment_done:false,appointment_confirmed:false,deduction_amount:null,cancel_reason:'אומת ידנית אך לא נמצא בטיפולוג'}).eq('id',cl.id);
+        await db.from('leads').update({cancelled:true,lead_status:'בוטל',appointment_done:false,appointment_confirmed:false,deduction_amount:null,cancel_reason:'אומת ידנית אך לא נמצא בטיפולוג',notes:_stampNote(cl.notes,'בוטל (אומת אך לא בטיפולוג)')}).eq('id',cl.id);
         await db.from('appointments').update({status:'cancelled'}).eq('lead_id',cl.id).eq('status','done');
         cnitCancelled++;
       }
