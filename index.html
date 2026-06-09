@@ -1,4 +1,4 @@
-<!-- build: 1780936639 -->
+<!-- build: 1780998470 -->
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -5206,12 +5206,37 @@ function showImportPreview(toConfirm,toReview,toCreate,toCancel,conflicts,missin
     html+='</div>';
   }
 
-  // יבוטלו
-  if(toCancel.length){
-    html+='<details style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:600;color:#e53935;padding:8px 0">❌ '+toCancel.length+' תורים יבוטלו (לחץ לפירוט)</summary>';
-    html+='<div style="max-height:150px;overflow-y:auto;margin-top:8px">';
-    toCancel.forEach(function(c){html+='<div style="padding:4px 8px;font-size:12px;border-bottom:1px solid #f0f0f0">'+c.lead.full_name+' | '+c.lead.appointment_date+' | '+(c.lead.doctor||'')+'</div>';});
+  // יאושרו — רשימה
+  if(toConfirm.length){
+    html+='<details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:600;color:#2e7d32;padding:6px 0">✅ '+toConfirm.length+' יאושרו (לחץ לפירוט)</summary>';
+    html+='<div style="max-height:160px;overflow-y:auto;margin-top:6px">';
+    toConfirm.forEach(function(c){var dc=(c.lead.doctor||c.imp.doctor||'').replace(/ד"ר /,'').split('(')[0].trim();html+='<div style="padding:4px 8px;font-size:12px;border-bottom:1px solid #f0f0f0">'+c.imp.full_name+' · '+c.imp.date+' · '+dc+' · ₪'+c.imp.price+(c.moved?' · <span style="color:#e65100">הוקדם</span>':'')+'</div>';});
     html+='</div></details>';
+  }
+  // ייווצרו חדשים — רשימה
+  if(toCreate.length){
+    html+='<details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:600;color:#1565c0;padding:6px 0">🆕 '+toCreate.length+' ייווצרו חדשים (לחץ לפירוט)</summary>';
+    html+='<div style="max-height:160px;overflow-y:auto;margin-top:6px">';
+    toCreate.forEach(function(c){var dc=(c.imp.doctor||'').replace(/ד"ר /,'').split('(')[0].trim();html+='<div style="padding:4px 8px;font-size:12px;border-bottom:1px solid #f0f0f0">'+c.imp.full_name+' · '+c.imp.date+' · '+dc+' · ₪'+c.imp.price+'</div>';});
+    html+='</div></details>';
+  }
+  // יבוטלו — דורש החלטה: בטל (ברירת מחדל) או נדחה עם תאריך תור חדש
+  if(toCancel.length){
+    html+='<div style="background:#fdecea;border:1.5px solid #e57373;border-radius:8px;padding:14px;margin-bottom:14px">';
+    html+='<div style="font-weight:700;color:#c62828;margin-bottom:4px">❌ '+toCancel.length+' תורים מתוכננים לביטול — אפשר להחליט לכל אחד</div>';
+    html+='<div style="font-size:11px;color:#9e9e9e;margin-bottom:10px">ברירת מחדל: בטל. לחלופין בחר "נדחה" וקבע תאריך תור חדש — הליד יישאר פעיל עם התאריך החדש.</div>';
+    toCancel.forEach(function(c,i){
+      var dc=(c.lead.appointment_date||'').slice(0,10);
+      var doc=(c.lead.doctor||'').replace(/ד"ר /,'').split('(')[0].trim();
+      html+='<div style="background:#fff;border-radius:6px;padding:10px;margin-bottom:8px;font-size:12px">';
+      html+='<div style="font-weight:600;margin-bottom:6px">'+c.lead.full_name+' · '+dc+' · '+doc+'</div>';
+      html+='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">';
+      html+='<label style="cursor:pointer"><input type="radio" name="cancel_'+i+'" value="cancel" checked onchange="resolveCancel('+i+',\'cancel\')"> בטל</label>';
+      html+='<label style="cursor:pointer"><input type="radio" name="cancel_'+i+'" value="postpone" onchange="resolveCancel('+i+',\'postpone\')"> נדחה</label>';
+      html+='<span style="color:#9e9e9e">תאריך תור חדש:</span> <input type="date" id="cancel_date_'+i+'" value="'+dc+'" onchange="resolveCancel('+i+',\'postpone\',this.value)" style="font-size:12px;padding:3px 6px;border:1px solid #ccc;border-radius:4px">';
+      html+='</div></div>';
+    });
+    html+='</div>';
   }
 
   // חסרי טלפון
@@ -5247,7 +5272,7 @@ function showImportPreview(toConfirm,toReview,toCreate,toCancel,conflicts,missin
   el.innerHTML=html;
 
   // שמור נתונים לביצוע
-  window._importData={toConfirm,toReview,toCreate,toCancel,conflicts,missingPhone,resolvedConflicts:{},resolvedReview:{}};
+  window._importData={toConfirm,toReview,toCreate,toCancel,conflicts,missingPhone,resolvedConflicts:{},resolvedReview:{},resolvedCancel:{}};
 }
 
 function resolveConflict(idx,choice){
@@ -5259,6 +5284,17 @@ function resolveReview(idx,choice){
   if(!window._importData)return;
   window._importData.resolvedReview[idx]=choice;
   _refreshImportBtn();
+}
+function resolveCancel(idx,action,date){
+  if(!window._importData)return;
+  if(action==='postpone'){
+    var r=document.querySelector('input[name="cancel_'+idx+'"][value="postpone"]');if(r)r.checked=true;
+    var di=document.getElementById('cancel_date_'+idx);
+    var d=date||(di&&di.value)||'';
+    window._importData.resolvedCancel[idx]={action:'postpone',date:d};
+  } else {
+    window._importData.resolvedCancel[idx]={action:'cancel'};
+  }
 }
 function _refreshImportBtn(){
   var d=window._importData;if(!d)return;
@@ -5319,11 +5355,20 @@ async function executeImport(){
       done++;
     }
 
-    // 3. בטל תורים שלא בקובץ
+    // 3. בטל או דחה תורים שלא בקובץ — לפי החלטת המשתמש (ברירת מחדל: בטל)
+    var postponed=0,cancelled=0;
     for(var k=0;k<d.toCancel.length;k++){
       var lead=d.toCancel[k].lead;
-      await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:'לא מופיע בייבוא טיפולוג'}).eq('id',lead.id);
-      await db.from('appointments').update({status:'cancelled'}).eq('lead_id',lead.id).eq('status','done');
+      var cd=(d.resolvedCancel&&d.resolvedCancel[k])||{action:'cancel'};
+      if(cd.action==='postpone'&&cd.date){
+        // נדחה — קבע תאריך תור חדש, הליד נשאר פעיל
+        await db.from('leads').update({appointment_date:cd.date,lead_status:'נקבע תור',cancelled:false,appointment_done:false,appointment_confirmed:false,cancel_reason:null}).eq('id',lead.id);
+        postponed++;
+      } else {
+        await db.from('leads').update({cancelled:true,lead_status:'בוטל',cancel_reason:'לא מופיע בייבוא טיפולוג'}).eq('id',lead.id);
+        await db.from('appointments').update({status:'cancelled'}).eq('lead_id',lead.id).eq('status','done');
+        cancelled++;
+      }
       done++;
     }
 
@@ -5366,7 +5411,7 @@ async function executeImport(){
       +'<div>\u05d0\u05d5\u05e9\u05e8\u05d5: '+d.toConfirm.length+' \u05ea\u05d5\u05e8\u05d9\u05dd</div>'
       +((reviewMerged||reviewRejected)?'<div>\u05d0\u05d5\u05d7\u05d3\u05d5: '+reviewMerged+' / \u05e0\u05d3\u05d7\u05d5 (\u05e0\u05d5\u05e6\u05e8 \u05d7\u05d3\u05e9): '+reviewRejected+'</div>':'')
       +'<div>\u05e0\u05d5\u05e6\u05e8\u05d5: '+d.toCreate.length+' \u05dc\u05d9\u05d3\u05d9\u05dd \u05d7\u05d3\u05e9\u05d9\u05dd</div>'
-      +'<div>\u05d1\u05d5\u05d8\u05dc\u05d5: '+d.toCancel.length+' \u05ea\u05d5\u05e8\u05d9\u05dd</div>'
+      +'<div>\u05d1\u05d5\u05d8\u05dc\u05d5: '+cancelled+' \u05ea\u05d5\u05e8\u05d9\u05dd'+(postponed?' \u00b7 \u05e0\u05d3\u05d7\u05d5 (\u05ea\u05d0\u05e8\u05d9\u05da \u05d7\u05d3\u05e9): '+postponed:'')+'</div>'
       +(d.missingPhone.length?'<div>\u05e0\u05e4\u05ea\u05d7\u05d5: '+d.missingPhone.length+' \u05de\u05e9\u05d9\u05de\u05d5\u05ea \u05d8\u05dc\u05e4\u05d5\u05df \u05d7\u05e1\u05e8</div>':'')
       +'</div>';
     window._importData=null;
